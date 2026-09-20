@@ -1,0 +1,63 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+* text=auto encoding=utf-8 eol=lf
+
+*.config               text encoding=utf-8 eol=lf
+*.cpp                  text encoding=utf-8 eol=lf diff=cpp
+*.css                  text encoding=utf-8 eol=lf
+*.csv                  text encoding=utf-8 eol=lf linguist-language=CSV
+*.go                   text encoding=utf-8 eol=lf diff=go
+*.h                    text encoding=utf-8 eol=lf diff=cpp
+*.hpp                  text encoding=utf-8 eol=lf diff=cpp
+*.json                 text encoding=utf-8 eol=lf diff=json linguist-language=JSON merge=ours
+*.md                   text encoding=utf-8 eol=lf
+*.proto                text encoding=utf-8 eol=lf diff=proto
+*.py                   text encoding=utf-8 eol=lf diff=python
+*.rs                   text encoding=utf-8 eol=lf diff=rust
+*.txt                  text encoding=utf-8 eol=lf
+*.xml                  text encoding=utf-8 eol=lf diff=html
+*.yaml                 text encoding=utf-8 eol=lf
+*.yml                  text encoding=utf-8 eol=lf
+.all-contributorsrc    text encoding=utf-8 eol=lf linguist-language=JSON
+Dockerfile             text encoding=utf-8 eol=lf
+LICENSE                text encoding=utf-8 eol=lf
+
+
+*.a       binary
+*.gz      binary
+*.jpeg    binary
+*.o       binary
+*.pdf     binary
+*.so      binary
+*.zip     binary
+*.jpg     binary filter=lfs diff=lfs merge=lfs -text
+*.png     binary filter=lfs diff=lfs merge=lfs -text
+*.ai      binary filter=lfs diff=lfs merge=lfs -text
+*.psd     binary filter=lfs diff=lfs merge=lfs -text
+
+*.mod     merge=ours
+*.sum     merge=ours
+*.svg     merge=ours
+
+
+vendor/**    linguist-vendored
+
+*.tmp        export-ignore
+*.tmp.*      export-ignore
+*~           export-ignore
+.DS_Store    export-ignore
+.~lock.*     export-ignore
+Thumbs.db    export-ignore

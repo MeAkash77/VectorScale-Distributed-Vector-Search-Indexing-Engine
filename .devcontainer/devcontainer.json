@@ -1,0 +1,30 @@
+{
+  "name": "Vald",
+  "image": "vdaas/vald-dev-container:nightly",
+  // Specify the Dockerfile below directly if you need to make customizations
+  // "dockerFile": "../dockers/dev/Dockerfile",
+  // "context": "..",
+  "runArgs": ["--cap-add=SYS_PTRACE", "--network=host"],
+  "features": {
+    // ARM64 devices does not support dind
+    // https://github.com/devcontainers/features/issues/219
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "containerEnv": {
+    "HISTFILE": "/commandhistory/.bash_history",
+    "PROMPT_COMMAND": "history -a"
+  },
+  "remoteUser": "root",
+  "workspaceFolder": "/go/src/github.com/vdaas/vald",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/go/src/github.com/vdaas/vald,type=bind,consistency=delegated",
+
+  // To access grafana
+  "appPort": "3000:3000",
+
+  // define named volume to store zsh history file
+  "mounts": [
+    "source=zshhistory-named-volume,target=/commandhistory,type=volume"
+  ],
+
+  "postAttachCommand": ["/bin/bash", ".devcontainer/postAttachCommand.sh"]
+}

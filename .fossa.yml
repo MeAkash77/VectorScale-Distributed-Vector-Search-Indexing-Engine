@@ -1,0 +1,67 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+version: 2
+cli:
+  server: https://app.fossa.com
+  fetcher: custom
+  project: vald
+  locator: git+github.com/vdaas/vald
+analyze:
+  modules:
+    - name: github.com/vdaas/vald/cmd/agent/core/ngt
+      type: go
+      target: github.com/vdaas/vald/cmd/agent/core/ngt
+      path: cmd/agent/core/ngt
+    - name: github.com/vdaas/vald/cmd/agent/sidecar
+      type: go
+      target: github.com/vdaas/vald/cmd/agent/sidecar
+      path: cmd/agent/sidecar
+    - name: github.com/vdaas/vald/cmd/discoverer/k8s
+      type: go
+      target: github.com/vdaas/vald/cmd/discoverer/k8s
+      path: cmd/discoverer/k8s
+    - name: github.com/vdaas/vald/cmd/gateway/filter
+      type: go
+      target: github.com/vdaas/vald/cmd/gateway/filter
+      path: cmd/gateway/filter
+    - name: github.com/vdaas/vald/cmd/gateway/lb
+      type: go
+      target: github.com/vdaas/vald/cmd/gateway/lb
+      path: cmd/gateway/lb
+    - name: github.com/vdaas/vald/cmd/manager/index
+      type: go
+      target: github.com/vdaas/vald/cmd/manager/index
+      path: cmd/manager/index
+    - name: github.com/vdaas/vald/cmd/tools/cli/vdctl
+      type: go
+      target: github.com/vdaas/vald/cmd/tools/cli/vdctl
+      path: cmd/tools/cli/vdctl
+    - name: github.com/vdaas/vald/hack/helm/schema/gen
+      type: go
+      target: github.com/vdaas/vald/hack/helm/schema/gen
+      path: hack/helm/schema/gen
+    - name: github.com/vdaas/vald/hack/license/gen
+      type: go
+      target: github.com/vdaas/vald/hack/license/gen
+      path: hack/license/gen
+    - name: github.com/vdaas/vald/hack/tools/config/agent/core/ngt
+      type: go
+      target: github.com/vdaas/vald/hack/tools/config/agent/core/ngt
+      path: hack/tools/config/agent/core/ngt
+    - name: github.com/vdaas/vald/hack/tools/config/discoverer/k8s
+      type: go
+      target: github.com/vdaas/vald/hack/tools/config/discoverer/k8s
+      path: hack/tools/config/discoverer/k8s

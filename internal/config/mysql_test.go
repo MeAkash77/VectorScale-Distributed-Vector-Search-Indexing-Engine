@@ -1,0 +1,522 @@
+// Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package config
+
+import (
+	"io/fs"
+	"reflect"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/vdaas/vald/internal/db/rdb/mysql"
+	"github.com/vdaas/vald/internal/errors"
+	testdata "github.com/vdaas/vald/internal/test"
+	"github.com/vdaas/vald/internal/test/goleak"
+)
+
+func TestMySQL_Bind(t *testing.T) {
+	type fields struct {
+		TLS                  *TLS
+		Net                  *Net
+		Charset              string
+		User                 string
+		Pass                 string
+		Name                 string
+		DB                   string
+		Timezone             string
+		InitialPingTimeLimit string
+		InitialPingDuration  string
+		ConnMaxLifeTime      string
+		Host                 string
+		MaxOpenConns         int
+		MaxIdleConns         int
+		Port                 uint16
+	}
+	type want struct {
+		want *MySQL
+	}
+	type test struct {
+		want       want
+		checkFunc  func(want, *MySQL) error
+		beforeFunc func(*testing.T)
+		afterFunc  func()
+		name       string
+		fields     fields
+	}
+	defaultCheckFunc := func(w want, got *MySQL) error {
+		if !reflect.DeepEqual(got, w.want) {
+			return errors.Errorf("got: \"%#v\",\n\t\t\t\twant: \"%#v\"", got, w.want)
+		}
+		return nil
+	}
+	tests := []test{
+		{
+			name: "return MySQL when all fields contain no prefix/suffix symbol and tls and tcp configuration is not set",
+			fields: fields{
+				DB:                   "db",
+				Host:                 "host",
+				Port:                 80,
+				User:                 "user",
+				Pass:                 "pass",
+				Name:                 "name",
+				Charset:              "charset",
+				Timezone:             "timezone",
+				InitialPingTimeLimit: "initialPingTimeLimit",
+				InitialPingDuration:  "initialPingDuration",
+				ConnMaxLifeTime:      "connMaxLifeTime",
+				MaxOpenConns:         10,
+				MaxIdleConns:         100,
+			},
+			want: want{
+				want: &MySQL{
+					DB:                   "db",
+					Host:                 "host",
+					Port:                 80,
+					User:                 "user",
+					Pass:                 "pass",
+					Name:                 "name",
+					Charset:              "charset",
+					Timezone:             "timezone",
+					InitialPingTimeLimit: "initialPingTimeLimit",
+					InitialPingDuration:  "initialPingDuration",
+					ConnMaxLifeTime:      "connMaxLifeTime",
+					MaxOpenConns:         10,
+					MaxIdleConns:         100,
+					TLS:                  new(TLS),
+					Net:                  new(Net),
+				},
+			},
+		},
+
+		{
+			name: "return MySQL when all fields contain no prefix/suffix symbol and tls and tcp configuration is set",
+			fields: fields{
+				DB:                   "db",
+				Host:                 "host",
+				Port:                 80,
+				User:                 "user",
+				Pass:                 "pass",
+				Name:                 "name",
+				Charset:              "charset",
+				Timezone:             "timezone",
+				InitialPingTimeLimit: "initialPingTimeLimit",
+				InitialPingDuration:  "initialPingDuration",
+				ConnMaxLifeTime:      "connMaxLifeTime",
+				MaxOpenConns:         10,
+				MaxIdleConns:         100,
+				TLS: &TLS{
+					Enabled: true,
+				},
+				Net: &Net{
+					DNS: new(DNS),
+				},
+			},
+			want: want{
+				want: &MySQL{
+					DB:                   "db",
+					Host:                 "host",
+					Port:                 80,
+					User:                 "user",
+					Pass:                 "pass",
+					Name:                 "name",
+					Charset:              "charset",
+					Timezone:             "timezone",
+					InitialPingTimeLimit: "initialPingTimeLimit",
+					InitialPingDuration:  "initialPingDuration",
+					ConnMaxLifeTime:      "connMaxLifeTime",
+					MaxOpenConns:         10,
+					MaxIdleConns:         100,
+					TLS: &TLS{
+						Enabled: true,
+					},
+					Net: &Net{
+						DNS: new(DNS),
+					},
+				},
+			},
+		},
+
+		{
+			name: "return MySQL with environment variable when it contains `_` as prefix and suffix",
+			fields: fields{
+				DB:                   "_MYSQL_BIND_DB_",
+				Host:                 "_MYSQL_BIND_HOST_",
+				Port:                 80,
+				User:                 "_MYSQL_BIND_USER_",
+				Pass:                 "_MYSQL_BIND_PASS_",
+				Name:                 "_MYSQL_BIND_NAME_",
+				Charset:              "_MYSQL_BIND_CHARSET_",
+				Timezone:             "_MYSQL_BIND_TIMEZONE_",
+				InitialPingTimeLimit: "_MYSQL_BIND_INITIAL_PING_TIME_LIMIT_",
+				InitialPingDuration:  "_MYSQL_BIND_INITIAL_PING_DURATION_",
+				ConnMaxLifeTime:      "_MYSQL_BIND_CONN_MAX_LIFE_TIME_",
+				MaxOpenConns:         10,
+				MaxIdleConns:         100,
+				TLS:                  new(TLS),
+				Net:                  new(Net),
+			},
+			want: want{
+				want: &MySQL{
+					DB:                   "db",
+					Host:                 "host",
+					Port:                 80,
+					User:                 "user",
+					Pass:                 "pass",
+					Name:                 "name",
+					Charset:              "charset",
+					Timezone:             "timezone",
+					InitialPingTimeLimit: "initialPingTimeLimit",
+					InitialPingDuration:  "initialPingDuration",
+					ConnMaxLifeTime:      "connMaxLifeTime",
+					MaxOpenConns:         10,
+					MaxIdleConns:         100,
+					TLS:                  new(TLS),
+					Net:                  new(Net),
+				},
+			},
+			beforeFunc: func(t *testing.T) {
+				t.Helper()
+				t.Setenv("MYSQL_BIND_DB", "db")
+				t.Setenv("MYSQL_BIND_HOST", "host")
+				t.Setenv("MYSQL_BIND_USER", "user")
+				t.Setenv("MYSQL_BIND_PASS", "pass")
+				t.Setenv("MYSQL_BIND_NAME", "name")
+				t.Setenv("MYSQL_BIND_CHARSET", "charset")
+				t.Setenv("MYSQL_BIND_TIMEZONE", "timezone")
+				t.Setenv("MYSQL_BIND_INITIAL_PING_TIME_LIMIT", "initialPingTimeLimit")
+				t.Setenv("MYSQL_BIND_INITIAL_PING_DURATION", "initialPingDuration")
+				t.Setenv("MYSQL_BIND_CONN_MAX_LIFE_TIME", "connMaxLifeTime")
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		test := tc
+		t.Run(test.name, func(tt *testing.T) {
+			if test.beforeFunc != nil {
+				test.beforeFunc(tt)
+			}
+			if test.afterFunc != nil {
+				defer test.afterFunc()
+			}
+			checkFunc := test.checkFunc
+			if test.checkFunc == nil {
+				checkFunc = defaultCheckFunc
+			}
+			m := &MySQL{
+				DB:                   test.fields.DB,
+				Host:                 test.fields.Host,
+				Port:                 test.fields.Port,
+				User:                 test.fields.User,
+				Pass:                 test.fields.Pass,
+				Name:                 test.fields.Name,
+				Charset:              test.fields.Charset,
+				Timezone:             test.fields.Timezone,
+				InitialPingTimeLimit: test.fields.InitialPingTimeLimit,
+				InitialPingDuration:  test.fields.InitialPingDuration,
+				ConnMaxLifeTime:      test.fields.ConnMaxLifeTime,
+				MaxOpenConns:         test.fields.MaxOpenConns,
+				MaxIdleConns:         test.fields.MaxIdleConns,
+				TLS:                  test.fields.TLS,
+				Net:                  test.fields.Net,
+			}
+
+			got := m.Bind()
+			if err := checkFunc(test.want, got); err != nil {
+				tt.Errorf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestMySQL_Opts(t *testing.T) {
+	type fields struct {
+		TLS                  *TLS
+		Net                  *Net
+		Timezone             string
+		InitialPingTimeLimit string
+		User                 string
+		Pass                 string
+		Name                 string
+		Charset              string
+		DB                   string
+		Network              string
+		InitialPingDuration  string
+		ConnMaxLifeTime      string
+		Host                 string
+		MaxIdleConns         int
+		MaxOpenConns         int
+		Port                 uint16
+	}
+	type want struct {
+		err  error
+		want []mysql.Option
+	}
+	type test struct {
+		checkFunc  func(want, []mysql.Option, error) error
+		beforeFunc func()
+		afterFunc  func()
+		name       string
+		want       want
+		fields     fields
+	}
+	defaultCheckFunc := func(w want, got []mysql.Option, err error) error {
+		if !errors.Is(err, w.err) {
+			return errors.Errorf("got_error: \"%#v\",\n\t\t\t\twant: \"%#v\"", err, w.err)
+		}
+		if !reflect.DeepEqual(len(got), len(w.want)) {
+			return errors.Errorf("length got: \"%#v\",\n\t\t\t\tlength want: \"%#v\"", len(got), len(w.want))
+		}
+		return nil
+	}
+	tests := []test{
+		{
+			name: "return 17 option and nil when all parameters are set",
+			fields: fields{
+				DB:                   "mysql",
+				Host:                 "mysql.default.svc.cluster.clocal",
+				Network:              "tcp",
+				Port:                 3360,
+				User:                 "root",
+				Pass:                 "pass",
+				Name:                 "vald",
+				Charset:              "utf8mb4",
+				Timezone:             "Local",
+				InitialPingTimeLimit: "5m",
+				InitialPingDuration:  "30ms",
+				ConnMaxLifeTime:      "2m",
+				MaxOpenConns:         40,
+				MaxIdleConns:         50,
+				TLS: &TLS{
+					Enabled: true,
+					Cert:    testdata.GetTestdataPath("tls/server.crt"),
+					Key:     testdata.GetTestdataPath("tls/server.key"),
+					CA:      testdata.GetTestdataPath("tls/ca.pem"),
+				},
+				Net: new(Net),
+			},
+			want: want{
+				want: make([]mysql.Option, 17),
+			},
+		},
+		{
+			name: "return 17 option and nil when all parameters are set but the network type is invalid",
+			fields: fields{
+				DB:                   "mysql",
+				Host:                 "mysql.default.svc.cluster.clocal",
+				Network:              "unknown",
+				Port:                 3360,
+				User:                 "root",
+				Pass:                 "pass",
+				Name:                 "vald",
+				Charset:              "utf8mb4",
+				Timezone:             "Local",
+				InitialPingTimeLimit: "5m",
+				InitialPingDuration:  "30ms",
+				ConnMaxLifeTime:      "2m",
+				MaxOpenConns:         40,
+				MaxIdleConns:         50,
+				TLS: &TLS{
+					Enabled: true,
+					Cert:    testdata.GetTestdataPath("tls/server.crt"),
+					Key:     testdata.GetTestdataPath("tls/server.key"),
+					CA:      testdata.GetTestdataPath("tls/ca.pem"),
+				},
+				Net: new(Net),
+			},
+			want: want{
+				want: make([]mysql.Option, 17),
+			},
+		},
+		{
+			name: "return 17 option and nil when all parameters are set but the network type is empty",
+			fields: fields{
+				DB:                   "mysql",
+				Host:                 "mysql.default.svc.cluster.clocal",
+				Network:              "",
+				Port:                 3360,
+				User:                 "root",
+				Pass:                 "pass",
+				Name:                 "vald",
+				Charset:              "utf8mb4",
+				Timezone:             "Local",
+				InitialPingTimeLimit: "5m",
+				InitialPingDuration:  "30ms",
+				ConnMaxLifeTime:      "2m",
+				MaxOpenConns:         40,
+				MaxIdleConns:         50,
+				TLS: &TLS{
+					Enabled: true,
+					Cert:    testdata.GetTestdataPath("tls/server.crt"),
+					Key:     testdata.GetTestdataPath("tls/server.key"),
+					CA:      testdata.GetTestdataPath("tls/ca.pem"),
+				},
+				Net: new(Net),
+			},
+			want: want{
+				want: make([]mysql.Option, 17),
+			},
+		},
+		{
+			name: "return nil and error when all parameters are set but the tls creation returns an error",
+			fields: fields{
+				DB:                   "mysql",
+				Host:                 "mysql.default.svc.cluster.clocal",
+				Port:                 3360,
+				User:                 "root",
+				Pass:                 "pass",
+				Name:                 "vald",
+				Charset:              "utf8mb4",
+				Timezone:             "Local",
+				InitialPingTimeLimit: "5m",
+				InitialPingDuration:  "30ms",
+				ConnMaxLifeTime:      "2m",
+				MaxOpenConns:         40,
+				MaxIdleConns:         50,
+				TLS: &TLS{
+					Enabled: true,
+					Cert:    testdata.GetTestdataPath("tls/server.crt"),
+					Key:     "tls/server.key",
+					CA:      testdata.GetTestdataPath("tls/ca.pem"),
+				},
+				Net: new(Net),
+			},
+			want: want{
+				want: nil,
+				err: &fs.PathError{
+					Op:   "open",
+					Path: "tls/server.key",
+					Err:  syscall.Errno(0x2),
+				},
+			},
+		},
+		{
+			name: "return nil and error when all parameters are set but the dialer creation returns an error",
+			fields: fields{
+				DB:                   "mysql",
+				Host:                 "mysql.default.svc.cluster.clocal",
+				Port:                 3360,
+				User:                 "root",
+				Pass:                 "pass",
+				Name:                 "vald",
+				Charset:              "utf8mb4",
+				Timezone:             "Local",
+				InitialPingTimeLimit: "5m",
+				InitialPingDuration:  "30ms",
+				ConnMaxLifeTime:      "2m",
+				MaxOpenConns:         40,
+				MaxIdleConns:         50,
+				TLS: &TLS{
+					Enabled: true,
+					Cert:    testdata.GetTestdataPath("tls/server.crt"),
+					Key:     testdata.GetTestdataPath("tls/server.key"),
+					CA:      testdata.GetTestdataPath("tls/ca.pem"),
+				},
+				Net: &Net{
+					DNS: &DNS{
+						CacheEnabled:    true,
+						CacheExpiration: "1m",
+						RefreshDuration: "10m",
+					},
+				},
+			},
+			want: want{
+				want: nil,
+				err:  errors.ErrInvalidDNSConfig(10*time.Minute, time.Minute),
+			},
+		},
+		{
+			name: "return nil and error when all parameters are set but the Net.TLS.Opts returns an error",
+			fields: fields{
+				DB:                   "mysql",
+				Host:                 "mysql.default.svc.cluster.clocal",
+				Port:                 3360,
+				User:                 "root",
+				Pass:                 "pass",
+				Name:                 "vald",
+				Charset:              "utf8mb4",
+				Timezone:             "Local",
+				InitialPingTimeLimit: "5m",
+				InitialPingDuration:  "30ms",
+				ConnMaxLifeTime:      "2m",
+				MaxOpenConns:         40,
+				MaxIdleConns:         50,
+				TLS: &TLS{
+					Enabled: true,
+					Cert:    testdata.GetTestdataPath("tls/server.crt"),
+					Key:     testdata.GetTestdataPath("tls/server.key"),
+					CA:      testdata.GetTestdataPath("tls/ca.pem"),
+				},
+				Net: &Net{
+					DNS: &DNS{
+						CacheEnabled:    true,
+						CacheExpiration: "10m",
+						RefreshDuration: "1m",
+					},
+					TLS: &TLS{
+						Enabled: true,
+					},
+				},
+			},
+			want: want{
+				want: nil,
+				err:  errors.ErrTLSCertOrKeyNotFound,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		test := tc
+		t.Run(test.name, func(tt *testing.T) {
+			defer goleak.VerifyNone(tt, goleak.IgnoreCurrent())
+			if test.beforeFunc != nil {
+				test.beforeFunc()
+			}
+			if test.afterFunc != nil {
+				defer test.afterFunc()
+			}
+			checkFunc := test.checkFunc
+			if test.checkFunc == nil {
+				checkFunc = defaultCheckFunc
+			}
+			m := &MySQL{
+				DB:                   test.fields.DB,
+				Network:              test.fields.Network,
+				Host:                 test.fields.Host,
+				Port:                 test.fields.Port,
+				User:                 test.fields.User,
+				Pass:                 test.fields.Pass,
+				Name:                 test.fields.Name,
+				Charset:              test.fields.Charset,
+				Timezone:             test.fields.Timezone,
+				InitialPingTimeLimit: test.fields.InitialPingTimeLimit,
+				InitialPingDuration:  test.fields.InitialPingDuration,
+				ConnMaxLifeTime:      test.fields.ConnMaxLifeTime,
+				MaxOpenConns:         test.fields.MaxOpenConns,
+				MaxIdleConns:         test.fields.MaxIdleConns,
+				TLS:                  test.fields.TLS,
+				Net:                  test.fields.Net,
+			}
+
+			got, err := m.Opts()
+			if err := checkFunc(test.want, got, err); err != nil {
+				tt.Errorf("error = %v", err)
+			}
+		})
+	}
+}
+
+// NOT IMPLEMENTED BELOW

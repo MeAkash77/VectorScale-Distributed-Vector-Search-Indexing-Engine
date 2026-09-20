@@ -1,0 +1,299 @@
+{
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "contributors": [
+    {
+      "login": "kpango",
+      "name": "Yusuke Kato",
+      "avatar_url": "https://avatars1.githubusercontent.com/u/9798091?v=4",
+      "profile": "https://kpango.com",
+      "contributions": [
+        "code",
+        "design",
+        "maintenance",
+        "projectManagement"
+      ]
+    },
+    {
+      "login": "rinx",
+      "name": "Rintaro Okamura",
+      "avatar_url": "https://avatars3.githubusercontent.com/u/1588935?v=4",
+      "profile": "https://github.com/rinx",
+      "contributions": [
+        "code",
+        "doc",
+        "maintenance",
+        "platform"
+      ]
+    },
+    {
+      "login": "kmrmt",
+      "name": "Kosuke Morimoto",
+      "avatar_url": "https://avatars2.githubusercontent.com/u/413873?v=4",
+      "profile": "https://morimoto.dev/",
+      "contributions": [
+        "code",
+        "example",
+        "tool",
+        "test"
+      ]
+    },
+    {
+      "login": "vankichi",
+      "name": "Kiichiro YUKAWA",
+      "avatar_url": "https://avatars3.githubusercontent.com/u/13959763?v=4",
+      "profile": "https://github.com/vankichi",
+      "contributions": [
+        "doc",
+        "maintenance",
+        "test",
+        "tutorial"
+      ]
+    },
+    {
+      "login": "datelier",
+      "name": "datelier",
+      "avatar_url": "https://avatars3.githubusercontent.com/u/57349093?v=4",
+      "profile": "https://github.com/datelier",
+      "contributions": [
+        "code",
+        "ideas"
+      ]
+    },
+    {
+      "login": "kevindiu",
+      "name": "Kevin Diu",
+      "avatar_url": "https://avatars1.githubusercontent.com/u/1985382?v=4",
+      "profile": "https://github.com/kevindiu",
+      "contributions": [
+        "doc",
+        "example",
+        "test",
+        "tutorial"
+      ]
+    },
+    {
+      "login": "hlts2",
+      "name": "Hiroto Funakoshi",
+      "avatar_url": "https://avatars0.githubusercontent.com/u/25459661?v=4",
+      "profile": "https://twitter.com/hiroto_hlts2",
+      "contributions": [
+        "doc",
+        "tool",
+        "test",
+        "tutorial"
+      ]
+    },
+    {
+      "login": "taisuou",
+      "name": "taisho",
+      "avatar_url": "https://avatars0.githubusercontent.com/u/21119375?v=4",
+      "profile": "https://github.com/taisuou",
+      "contributions": [
+        "design",
+        "doc",
+        "example"
+      ]
+    },
+    {
+      "login": "pgrimaud",
+      "name": "Pierre Grimaud",
+      "avatar_url": "https://avatars1.githubusercontent.com/u/1866496?v=4",
+      "profile": "https://github.com/pgrimaud",
+      "contributions": [
+        "doc"
+      ]
+    },
+    {
+      "login": "thedrow",
+      "name": "Omer Katz",
+      "avatar_url": "https://avatars.githubusercontent.com/u/48936?v=4",
+      "profile": "https://omerkatz.com",
+      "contributions": [
+        "doc",
+        "tutorial"
+      ]
+    },
+    {
+      "login": "zchee",
+      "name": "Koichi Shiraishi",
+      "avatar_url": "https://avatars.githubusercontent.com/u/6366270?v=4",
+      "profile": "https://github.com/zchee",
+      "contributions": [
+        "a11y"
+      ]
+    },
+    {
+      "login": "liusy182",
+      "name": "Siyuan Liu",
+      "avatar_url": "https://avatars.githubusercontent.com/u/3293332?v=4",
+      "profile": "https://github.com/liusy182",
+      "contributions": [
+        "a11y",
+        "example"
+      ]
+    },
+    {
+      "login": "dotdc",
+      "name": "David Calvert",
+      "avatar_url": "https://avatars.githubusercontent.com/u/12827900?v=4",
+      "profile": "https://github.com/dotdc",
+      "contributions": [
+        "doc"
+      ]
+    },
+    {
+      "login": "takuyaymd",
+      "name": "takuyaymd",
+      "avatar_url": "https://avatars.githubusercontent.com/u/49614391?v=4",
+      "profile": "https://github.com/takuyaymd",
+      "contributions": [
+        "bug",
+        "code",
+        "maintenance"
+      ]
+    },
+    {
+      "login": "junsei-ando",
+      "name": "junsei-ando",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1892077?v=4",
+      "profile": "https://github.com/junsei-ando",
+      "contributions": [
+        "doc"
+      ]
+    },
+    {
+      "login": "ykadowak",
+      "name": "Yusuke Kadowaki",
+      "avatar_url": "https://avatars.githubusercontent.com/u/60080334?v=4",
+      "profile": "https://github.com/ykadowak",
+      "contributions": [
+        "code",
+        "test"
+      ]
+    },
+    {
+      "login": "aknishid",
+      "name": "aknishid",
+      "avatar_url": "https://avatars.githubusercontent.com/u/38955080?v=4",
+      "profile": "https://github.com/aknishid",
+      "contributions": [
+        "code",
+        "maintenance",
+        "doc"
+      ]
+    },
+    {
+      "login": "hrichiksite",
+      "name": "Hrichik Mazumder",
+      "avatar_url": "https://avatars.githubusercontent.com/u/57860916?v=4",
+      "profile": "https://hrichik.xyz",
+      "contributions": [
+        "doc"
+      ]
+    },
+    {
+      "login": "smorihira",
+      "name": "Shunya Morihira (森平 隼矢)",
+      "avatar_url": "https://avatars.githubusercontent.com/u/105629359?v=4",
+      "profile": "https://github.com/smorihira",
+      "contributions": [
+        "tool",
+        "code"
+      ]
+    },
+    {
+      "login": "iammytoo",
+      "name": "miyamoto",
+      "avatar_url": "https://avatars.githubusercontent.com/u/64457274?v=4",
+      "profile": "https://github.com/iammytoo",
+      "contributions": [
+        "code",
+        "research"
+      ]
+    },
+    {
+      "login": "highpon",
+      "name": "s-shiraki",
+      "avatar_url": "https://avatars.githubusercontent.com/u/54130718?v=4",
+      "profile": "https://www.highpon.com/",
+      "contributions": [
+        "test",
+        "code"
+      ]
+    },
+    {
+      "login": "irokaru",
+      "name": "irokaru",
+      "avatar_url": "https://avatars.githubusercontent.com/u/23948752?v=4",
+      "profile": "https://nononotyaya.net/",
+      "contributions": [
+        "bug",
+        "code"
+      ]
+    },
+    {
+      "login": "Matts966",
+      "name": "Matts966",
+      "avatar_url": "https://avatars.githubusercontent.com/u/28551465?v=4",
+      "profile": "https://github.com/Matts966",
+      "contributions": [
+        "code",
+        "infra",
+        "maintenance",
+        "review"
+      ]
+    },
+    {
+      "login": "Kynea0b",
+      "name": "Kynea0b",
+      "avatar_url": "https://avatars.githubusercontent.com/u/52264064?v=4",
+      "profile": "https://github.com/Kynea0b",
+      "contributions": [
+        "doc"
+      ]
+    },
+    {
+      "login": "jumpei527",
+      "name": "Jumpei Tanikawa",
+      "avatar_url": "https://avatars.githubusercontent.com/u/146912434?v=4",
+      "profile": "https://github.com/jumpei527",
+      "contributions": [
+        "code",
+        "maintenance"
+      ]
+    },
+    {
+      "login": "Sh1ragami",
+      "name": "白神 晴陽",
+      "avatar_url": "https://avatars.githubusercontent.com/u/132182457?v=4",
+      "profile": "https://aiel.jp",
+      "contributions": [
+        "tool",
+        "code"
+      ]
+    },
+    {
+      "login": "nac-39",
+      "name": "nac-39",
+      "avatar_url": "https://avatars.githubusercontent.com/u/83295760?v=4",
+      "profile": "https://nac-39.com",
+      "contributions": [
+        "infra"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7,
+  "contributorsSortAlphabetically": false,
+  "badgeTemplate": "[![All Contributors](https://img.shields.io/badge/all_contributors-<%= contributors.length %>-orange.svg?style=flat-square)](#contributors)",
+  "projectName": "vald",
+  "projectOwner": "vdaas",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "skipCi": true,
+  "commitConvention": "angular",
+  "commitType": "docs"
+}

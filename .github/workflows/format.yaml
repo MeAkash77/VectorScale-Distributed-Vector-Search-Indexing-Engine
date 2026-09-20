@@ -1,0 +1,149 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+name: Run formatter
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+jobs:
+  dump-contexts-to-log:
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    runs-on: ubuntu-slim
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/dump-context
+
+  detect-ci-container:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/_detect-ci-container.yaml
+
+  format:
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/vdaas/vald/vald-dev-container:nightly
+      credentials:
+        username: ${{ secrets.PACKAGE_USER }}
+        password: ${{ secrets.PACKAGE_TOKEN }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          token: ${{ secrets.DISPATCH_TOKEN }}
+      - name: Set Git config
+        run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+      - uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+      - name: Switch new branch
+        id: switch_to_new_branch
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S_%3N)
+          BRANCH_NAME="formatter/go_and_yaml/format_at_${TIMESTAMP}"
+          git checkout main
+          git checkout -b ${BRANCH_NAME}
+          echo "BRANCH_NAME=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+      - name: Run formatter and license.go
+        run: |
+          make deps/install proto/replace
+          make format
+          git checkout go.mod go.sum ./example/client/go.mod ./example/client/go.sum ./rust/Cargo.lock ./rust/rust-toolchain.toml ./dockers
+          git diff --name-only | { grep -E "^rust/.*Cargo\\.toml$" || true; } | xargs -r git checkout --
+      - name: Check difference
+        id: check_diff
+        run: |
+          if git diff --quiet --exit-code; then
+            echo "Nothing updated"
+          else
+            git diff && git status
+            echo "HAS_GIT_DIFF=true" >> $GITHUB_OUTPUT
+          fi
+      - name: Get Label
+        id: pr-label
+        if: ${{ steps.check_diff.outputs.HAS_GIT_DIFF == 'true' }}
+        run: |
+          LATEST=$(make version/vald | grep -o -E "[0-9]+\.[0-9]+")
+          if ${LATEST} eq "1.7"; then
+            echo "LABELS=release/v${LATEST}" >> $GITHUB_OUTPUT
+          else
+            SUPPORT=$(echo ${LATEST} | awk '{print $1-0.1}')
+            echo "LABELS=actions/backport/release/v${LATEST},release/v${SUPPORT}" >> $GITHUB_OUTPUT
+          fi
+      - name: Create PR
+        if: ${{ steps.check_diff.outputs.HAS_GIT_DIFF == 'true' }}
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          author: "${{ secrets.DISPATCH_USER }} <vald@vdaas.org>"
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          committer: "${{ secrets.DISPATCH_USER }} <vald@vdaas.org>"
+          signoff: true
+          delete-branch: true
+          base: main
+          title: "Update license headers / Format codes"
+          body: "Update license headers / Format Go codes and YAML files."
+          labels: ${{ steps.pr-label.outputs.LABELS }}
+
+  check-format-diff:
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false }}
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/vdaas/vald/vald-dev-container:nightly
+      credentials:
+        username: ${{ secrets.PACKAGE_USER }}
+        password: ${{ secrets.PACKAGE_TOKEN }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          token: ${{ secrets.DISPATCH_TOKEN }}
+      - name: Set Git config
+        run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+      - name: Run `make format` and `make deps/install`
+        run: |
+          make deps/install proto/replace
+          make format
+          git checkout go.mod go.sum ./example/client/go.mod ./example/client/go.sum ./rust/Cargo.lock ./rust/rust-toolchain.toml ./dockers
+          git diff --name-only | { grep -E "^rust/.*Cargo\\.toml$" || true; } | xargs -r git checkout --
+      - name: Check format and deps difference
+        run: |
+          if git diff --quiet --exit-code -w; then
+            echo "Nothing updated"
+          else
+            git diff
+            echo "Please execute \`make format\` locally."
+            exit 1
+          fi

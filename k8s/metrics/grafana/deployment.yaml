@@ -1,0 +1,108 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana
+          ports:
+            - containerPort: 3000
+          volumeMounts:
+            - name: grafana-datasource-provider
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: grafana-dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: grafana-dashboards-vald-cluster-overview
+              mountPath: /var/lib/grafana/dashboards/00
+            - name: grafana-dashboards-vald-agent
+              mountPath: /var/lib/grafana/dashboards/01
+            - name: grafana-dashboards-vald-discoverer
+              mountPath: /var/lib/grafana/dashboards/02
+            - name: grafana-dashboards-vald-index-manager
+              mountPath: /var/lib/grafana/dashboards/05
+            - name: grafana-dashboards-vald-helm-operator
+              mountPath: /var/lib/grafana/dashboards/07
+            - name: grafana-dashboards-vald-lb-gateway
+              mountPath: /var/lib/grafana/dashboards/08
+            - name: grafana-dashboards-vald-index-correction
+              mountPath: /var/lib/grafana/dashboards/09
+            - name: grafana-dashboards-vald-benchmark-operator
+              mountPath: /var/lib/grafana/dashboards/10
+            - name: grafana-dashboards-vald-otel-collector
+              mountPath: /var/lib/grafana/dashboards/11
+            - name: grafana-dashboards-vald-agent-memory
+              mountPath: /var/lib/grafana/dashboards/99
+      volumes:
+        - name: grafana-datasource-provider
+          configMap:
+            defaultMode: 420
+            name: grafana-datasource-provider
+        - name: grafana-dashboard-provider
+          configMap:
+            defaultMode: 420
+            name: grafana-dashboard-provider
+        - name: grafana-dashboards-vald-cluster-overview
+          configMap:
+            defaultMode: 420
+            name: grafana-dashboards-vald-cluster-overview
+        - name: grafana-dashboards-vald-agent
+          configMap:
+            defaultMode: 420
+            name: grafana-dashboards-vald-agent
+        - name: grafana-dashboards-vald-discoverer
+          configMap:
+            defaultMode: 420
+            name: grafana-dashboards-vald-discoverer
+        - name: grafana-dashboards-vald-index-manager
+          configMap:
+            defaultMode: 420
+            name: grafana-dashboards-vald-index-manager
+        - name: grafana-dashboards-vald-helm-operator
+          configMap:
+            defaultMode: 420
+            name: grafana-dashboards-vald-helm-operator
+        - name: grafana-dashboards-vald-lb-gateway
+          configMap:
+            defaultMode: 420
+            name: grafana-dashboards-vald-lb-gateway
+        - name: grafana-dashboards-vald-index-correction
+          configMap:
+            defaultMode: 420
+            name: grafana-dashboards-vald-index-correction
+        - name: grafana-dashboards-vald-agent-memory
+          configMap:
+            defaultMode: 420
+            name: grafana-dashboards-vald-agent-memory
+        - name: grafana-dashboards-vald-benchmark-operator
+          configMap:
+            defaultMode: 420
+            name: grafana-dashboards-vald-benchmark-operator
+        - name: grafana-dashboards-vald-otel-collector
+          configMap:
+            defaultMode: 420
+            name: grafana-dashboards-vald-otel-collector

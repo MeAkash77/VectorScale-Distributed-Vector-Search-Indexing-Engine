@@ -1,0 +1,120 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+name: "Build Docker images"
+description: "An action to build Docker images and publish them"
+inputs:
+  target:
+    description: "Build target"
+    required: true
+    default: "base"
+  builder:
+    description: "Buildx builder name"
+    required: true
+    default: ""
+  image_name:
+    description: "Image name"
+    required: true
+  alter_image_name:
+    description: "Alter image name"
+    required: false
+    default: ""
+  primary_tag:
+    description: "Primary tag"
+    required: true
+  extra_tags:
+    description: "Extra tags"
+    required: false
+    default: ""
+outputs:
+  PLATFORMS:
+    description: "Target platforms"
+    value: ${{ steps.determine_build_platforms.outputs.PLATFORMS }}
+runs:
+  using: "composite"
+  steps:
+    - name: Determine build platform
+      shell: bash
+      id: determine_build_platform
+      run: |
+        arch=$(make docker/darch)
+        platform=$(make docker/platform)
+        echo "ARCH is determined: ${arch}"
+        echo "ARCH=${arch}" >> $GITHUB_OUTPUT
+        echo "PLATFORM is determined: ${platform}"
+        echo "PLATFORM=${platform}" >> $GITHUB_OUTPUT
+    - name: Build and Push
+      shell: bash
+      id: build_and_push
+      run: |
+        for tag in ${EXTRA_TAGS}; do
+          extra_args="${extra_args} -t ${IMAGE_NAME}:${tag}-${ARCH} -t ${ALTER_IMAGE_NAME}:${tag}-${ARCH}"
+        done
+
+        # For the dev-container image, stamp a toolchain fingerprint label so the
+        # e2e freshness gate can tell whether a cached image already matches the
+        # PR head's toolchain (Go version + dev Dockerfile) and avoid racing an
+        # in-flight rebuild. Computed from the single-source make target so the
+        # label and the gate can never drift.
+        fp_label=""
+        if [ "${TARGET}" = "dev-container" ]; then
+          fp="$(make -s docker/dev-container/toolchain-fingerprint)"
+          fp_label="--label org.vdaas.vald.dev-container.toolchain-fingerprint=${fp}"
+        fi
+
+        build() {
+          make \
+            REMOTE="true" \
+            DOCKER="docker" \
+            BUILDKIT_INLINE_CACHE=0 \
+            DOCKER_OPTS="--platform ${PLATFORM} --builder ${BUILDER} ${LABEL_OPTS} ${fp_label} \
+            --label org.opencontainers.image.version=${PRIMARY_TAG}-${ARCH} \
+            --label org.opencontainers.image.title=${TARGET} \
+            --label org.opencontainers.image.created=\"$(date --rfc-3339=ns)\" \
+            --label org.opencontainers.image.licenses=\"Apache 2.0\"" \
+            EXTRA_ARGS="${extra_args}" \
+            TAG="${PRIMARY_TAG}-${ARCH}" \
+            docker/build/${TARGET}
+        }
+
+        # Retry to ride out transient docker.io registry handshake timeouts
+        # ("Get https://registry-1.docker.io/v2/: net/http: ... Client.Timeout")
+        # that intermittently fail the pull/login/push. buildkit layer caching
+        # makes each retry cheap (only the uncached/failed work re-runs).
+        attempt=1
+        max_attempts=3
+        while true; do
+          if build; then
+            break
+          fi
+          if [ "${attempt}" -ge "${max_attempts}" ]; then
+            echo "::error::docker/build/${TARGET} failed after ${max_attempts} attempts"
+            exit 1
+          fi
+          echo "::warning::docker/build/${TARGET} attempt ${attempt} failed (likely a transient registry timeout); retrying in 30s"
+          attempt=$((attempt + 1))
+          sleep 30
+        done
+      env:
+        TARGET: ${{ inputs.target }}
+        DOCKER_BUILDKIT: "1"
+        PLATFORM: ${{ steps.determine_build_platform.outputs.PLATFORM }}
+        ARCH: ${{ steps.determine_build_platform.outputs.ARCH }}
+        BUILDER: ${{ inputs.builder }}
+        LABEL_OPTS: "--label org.opencontainers.image.url=${{ github.event.repository.html_url }} --label org.opencontainers.image.source=${{ github.event.repository.html_url }} --label org.opencontainers.image.revision=${{ github.sha }}"
+        IMAGE_NAME: ${{ inputs.image_name }}
+        ALTER_IMAGE_NAME: ${{ inputs.alter_image_name }}
+        PRIMARY_TAG: ${{ inputs.primary_tag }}
+        EXTRA_TAGS: ${{ inputs.extra_tags }}

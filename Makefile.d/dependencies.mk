@@ -1,0 +1,420 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+.PHONY: update/libs
+## update vald libraries including tools
+update/libs: \
+	update/buf \
+	update/busybox \
+	update/chaos-mesh \
+	update/cmake \
+	update/docker \
+	update/faiss \
+	update/go \
+	update/golangci-lint \
+	update/hdf5 \
+	update/helm \
+	update/helm-docs \
+	update/operator/helm \
+	update/jaeger-operator \
+	update/k3d \
+	update/k3s \
+	update/kind \
+	update/kubectl \
+	update/kube-linter \
+	update/llvm \
+	update/ngt \
+	update/ninja \
+	update/openmp \
+	update/prometheus-stack \
+	update/protobuf \
+	update/reviewdog \
+	update/rust \
+	update/snapshotter \
+	update/telepresence \
+	update/vald \
+	update/yq \
+	update/zlib \
+	update/csi-driver-host-path
+	# update/usearch \
+
+.PHONY: go/download
+## download Go package dependencies
+go/download:
+	GOPRIVATE=$(GOPRIVATE) go mod download
+
+.PHONY: go/deps
+## install Go package dependencies
+go/deps:
+	head -n -1 $(ROOTDIR)/hack/go.mod.default | awk 'NR>=6 && $$0 !~ /(upgrade|latest|master|main)/' | sort
+	sed -i "3s/go [0-9]\+\.[0-9]\+\(\.[0-9]\+\)\?/go $(GO_VERSION)/g" $(ROOTDIR)/hack/go.mod.default
+	sed -i 's|\(grafana-foundation-sdk/go v\)[^+]*\(\+cog-v0\.0\.x\)|\1'"$(GRAFANA_VERSION).x"'\2|' $(ROOTDIR)/hack/go.mod.default
+	if $(GO_CLEAN_DEPS); then \
+	rm -rf \
+		$(ROOTDIR)/vendor \
+		/go/pkg \
+		$(GOCACHE) \
+		$(ROOTDIR)/go.sum \
+		$(ROOTDIR)/go.mod 2>/dev/null; \
+	cp $(ROOTDIR)/hack/go.mod.default $(ROOTDIR)/go.mod ; \
+	sed -i "s/#.*//" $(ROOTDIR)/go.mod ; \
+	GOPRIVATE=$(GOPRIVATE) go mod tidy ; \
+	go clean -cache -modcache -testcache -i -r ; \
+	rm -rf \
+		$(ROOTDIR)/vendor \
+		/go/pkg \
+		$(GOCACHE) \
+		$(ROOTDIR)/go.sum \
+		$(ROOTDIR)/go.mod 2>/dev/null; \
+	cp $(ROOTDIR)/hack/go.mod.default $(ROOTDIR)/go.mod ; \
+	sed -i "s/#.*//" $(ROOTDIR)/go.mod ; \
+	fi
+	cp $(ROOTDIR)/hack/go.mod.default $(ROOTDIR)/go.mod
+	sed -i "s/#.*//" $(ROOTDIR)/go.mod
+	GOTOOLCHAIN=go$(GO_VERSION) GOPRIVATE=$(GOPRIVATE) go mod tidy
+	GOTOOLCHAIN=go$(GO_VERSION) go get -u all 2>/dev/null || true
+	GOTOOLCHAIN=go$(GO_VERSION) go get -u $(ROOTDIR)/... 2>/dev/null || true
+
+.PHONY: go/example/deps
+## install Go package dependencies
+go/example/deps:
+	rm -rf \
+	$(ROOTDIR)/vendor \
+	$(GOCACHE) \
+	$(ROOTDIR)/example/client/vendor \
+	$(ROOTDIR)/example/client/go.mod \
+	$(ROOTDIR)/example/client/go.sum || true
+	sed -i "3s/go [0-9]\+\.[0-9]\+\(\.[0-9]\+\)\?/go $(GO_VERSION)/g" $(ROOTDIR)/example/client/go.mod.default
+	cp $(ROOTDIR)/example/client/go.mod.default $(ROOTDIR)/example/client/go.mod
+	cd $(ROOTDIR)/example/client \
+		&& GOTOOLCHAIN=go$(GO_VERSION) GOPRIVATE=$(GOPRIVATE) go mod tidy \
+		&& GOTOOLCHAIN=go$(GO_VERSION) go get -u all 2>/dev/null || true \
+		&& GOTOOLCHAIN=go$(GO_VERSION) go get -u $(ROOTDIR)/... 2>/dev/null || true \
+		&& cd -
+
+.PHONY: rust/deps
+## install Rust package dependencies
+rust/deps: \
+	rust/install
+	rustup toolchain install $(RUST_VERSION)
+	rustup default $(RUST_VERSION)
+	cd $(ROOTDIR)/rust \
+		&& $(CARGO_HOME)/bin/cargo update \
+		&& cd -
+
+.PHONY: update/chaos-mesh
+## update chaos-mesh version
+update/chaos-mesh:
+	$(call fetch-version,$(ROOTDIR)/versions/CHAOS_MESH_VERSION,\
+		curl -fsSL https://api.github.com/repos/chaos-mesh/chaos-mesh/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/v//g')
+
+.PHONY: update/k3d
+## update k3d version
+update/k3d:
+	$(call fetch-version,$(ROOTDIR)/versions/K3D_VERSION,\
+		curl -fsSL https://api.github.com/repos/k3d-io/k3d/releases/latest \
+		| jq -r '.tag_name' \
+		| sed 's/v//g')
+
+.PHONY: update/k3s
+## update k3s version
+update/k3s:
+	@{ \
+	RESULT=$$(curl -fsSL https://hub.docker.com/v2/repositories/rancher/k3s/tags?page_size=1000 | jq -r '.results[].name' | grep -E '.*-k3s[0-9]+$$' | grep -v rc | sort -Vr | head -n 1); \
+	if [ -n "$$RESULT" ]; then \
+		echo $$RESULT > $(ROOTDIR)/versions/K3S_VERSION; \
+	else \
+		echo "No version found" >&2; \
+	fi \
+	}
+
+.PHONY: update/go
+## update go version
+update/go:
+	$(call fetch-version,$(ROOTDIR)/versions/GO_VERSION,\
+		curl -fsSL https://go.dev/VERSION?m=text \
+		| head -n 1 \
+		| sed 's/go//g')
+
+.PHONY: update/golangci-lint
+## update golangci-lint version
+update/golangci-lint:
+	$(call fetch-version,$(ROOTDIR)/versions/GOLANGCILINT_VERSION,\
+		curl -fsSL https://api.github.com/repos/golangci/golangci-lint/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")')
+
+.PHONY: update/rust
+## update rust version
+update/rust:
+	$(call fetch-version,$(ROOTDIR)/versions/RUST_VERSION,\
+		curl -fsSL https://releases.rs \
+		| grep -Po 'Stable: \K[\d.]+' \
+		| head -n 1)
+	$(eval RUST_VERSION	:= $(shell $(MAKE) -s version/rust))
+	sed -i "/^channel = /s/channel = \"[0-9]\+\.[0-9]\+\(\.[0-9]\+\)\?.*\"/channel = \"$(RUST_VERSION)\"/g" \
+		$(ROOTDIR)/rust/rust-toolchain.toml
+
+.PHONY: update/docker
+## update docker version
+update/docker:
+	$(call fetch-version,$(ROOTDIR)/versions/DOCKER_VERSION,\
+		curl -fsSL https://api.github.com/repos/moby/moby/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/docker-//g')
+
+.PHONY: update/helm
+## update helm version
+update/helm:
+	$(call fetch-version,$(ROOTDIR)/versions/HELM_VERSION,\
+		curl -fsSL https://api.github.com/repos/helm/helm/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")')
+
+.PHONY: update/operator/helm
+## update helm-operator version
+update/operator/helm:
+	$(call fetch-version,$(ROOTDIR)/versions/OPERATOR_SDK_VERSION,\
+		curl -fsSL https://quay.io/api/v1/repository/operator-framework/helm-operator \
+		| jq -r '.tags' \
+		| grep name \
+		| grep -v master \
+		| grep -v latest \
+		| grep -v rc \
+		| head -1 \
+		| sed 's/.*"name": "\(.*\)",/\1/g')
+
+.PHONY: update/helm-docs
+## update helm-docs version
+update/helm-docs:
+	$(call fetch-version,$(ROOTDIR)/versions/HELM_DOCS_VERSION,\
+		curl -fsSL https://api.github.com/repos/norwoodj/helm-docs/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/v//g')
+
+.PHONY: update/protobuf
+## update protobuf version
+update/protobuf:
+	$(call fetch-version,$(ROOTDIR)/versions/PROTOBUF_VERSION,\
+		curl -fsSL https://api.github.com/repos/protocolbuffers/protobuf/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/v//g')
+
+.PHONY: update/buf
+## update buf version
+update/buf:
+	$(call fetch-version,$(ROOTDIR)/versions/BUF_VERSION,\
+		curl -fsSL https://api.github.com/repos/bufbuild/buf/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")')
+
+.PHONY: update/busybox
+## update busybox version
+update/busybox:
+	$(call fetch-version,$(ROOTDIR)/versions/BUSYBOX_VERSION,\
+		curl -fsSL "https://hub.docker.com/v2/repositories/library/busybox/tags/?page_size=100" \
+		| jq -r '.results[].name' \
+		| grep -E '^[0-9]+\.[0-9]+\.[0-9]+$$' \
+		| sort -V \
+		| tail -n 1)
+
+.PHONY: update/kind
+## update kind (kubernetes in docker) version
+update/kind:
+	$(call fetch-version,$(ROOTDIR)/versions/KIND_VERSION,\
+		curl -fsSL https://api.github.com/repos/kubernetes-sigs/kind/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/v//g')
+
+.PHONY: update/kubectl
+## update kubectl (kubernetes cli) version
+update/kubectl:
+	$(call fetch-version,$(ROOTDIR)/versions/KUBECTL_VERSION,\
+		curl -fsSL https://dl.k8s.io/release/stable.txt)
+
+.PHONY: update/prometheus-stack
+## update prometheus version
+update/prometheus-stack:
+	$(call fetch-version,$(ROOTDIR)/versions/PROMETHEUS_STACK_VERSION,\
+		curl -fsSL https://artifacthub.io/api/v1/packages/helm/prometheus-community/kube-prometheus-stack \
+		| jq -r '.version')
+
+.PHONY: update/jaeger-operator
+## update jaeger-operator version
+update/jaeger-operator:
+	$(call fetch-version,$(ROOTDIR)/versions/JAEGER_OPERATOR_VERSION,\
+		curl -fsSL https://artifacthub.io/api/v1/packages/helm/jaegertracing/jaeger-operator \
+		| jq -r '.version')
+
+.PHONY: update/kube-linter
+## update kube-linter version
+update/kube-linter:
+	$(call fetch-version,$(ROOTDIR)/versions/KUBELINTER_VERSION,\
+		curl -fsSL https://api.github.com/repos/stackrox/kube-linter/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")')
+
+# .PHONY: update/otel-operator
+# ## update otel-operator version
+# update/otel-operator:
+#	$(call fetch-version,$(ROOTDIR)/versions/OTEL_OPERATOR_VERSION,\
+#		curl -fsSL https://api.github.com/repos/open-telemetry/opentelemetry-operator/releases/latest \
+#		| grep -Po '"tag_name": "\K.*?(?=")')
+
+.PHONY: update/llvm
+## update llvm version
+update/llvm:
+	$(call fetch-version,$(ROOTDIR)/versions/LLVM_VERSION,\
+		curl -fsSL https://api.github.com/repos/llvm/llvm-project/releases/latest \
+		| grep -Po '"tag_name": "llvmorg-\K[^"]+')
+
+.PHONY: update/openmp
+## update llvm openmp version
+update/openmp: update/llvm
+
+.PHONY: update/ngt
+## update NGT-labs/NGT version
+update/ngt:
+	$(call fetch-version,$(ROOTDIR)/versions/NGT_VERSION,\
+		curl -fsSL https://api.github.com/repos/NGT-labs/NGT/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/v//g')
+
+.PHONY: update/faiss
+## update facebookresearch/faiss version
+update/faiss:
+	$(call fetch-version,$(ROOTDIR)/versions/FAISS_VERSION,\
+		curl -fsSL https://api.github.com/repos/facebookresearch/faiss/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/v//g')
+
+.PHONY: update/usearch
+## update usearch version
+update/usearch:
+	$(call fetch-version,$(ROOTDIR)/versions/USEARCH_VERSION,\
+		curl -fsSL https://api.github.com/repos/unum-cloud/usearch/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/v//g')
+
+.PHONY: update/cmake
+## update CMAKE version
+update/cmake:
+	$(call fetch-version,$(ROOTDIR)/versions/CMAKE_VERSION,\
+		curl -fsSL https://api.github.com/repos/Kitware/CMake/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/v//g')
+
+.PHONY: update/ninja
+## update NINJA version
+update/ninja:
+	$(call fetch-version,$(ROOTDIR)/versions/NINJA_VERSION,\
+		curl -fsSL https://api.github.com/repos/ninja-build/ninja/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/v//g')
+
+.PHONY: update/reviewdog
+## update reviewdog version
+update/reviewdog:
+	$(call fetch-version,$(ROOTDIR)/versions/REVIEWDOG_VERSION,\
+		curl -fsSL https://api.github.com/repos/reviewdog/reviewdog/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")')
+
+.PHONY: update/telepresence
+## update telepresence version
+update/telepresence:
+	$(call fetch-version,$(ROOTDIR)/versions/TELEPRESENCE_VERSION,\
+		curl -fsSL https://api.github.com/repos/telepresenceio/telepresence/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/v//g')
+
+.PHONY: update/yq
+## update YQ version
+update/yq:
+	$(call fetch-version,$(ROOTDIR)/versions/YQ_VERSION,\
+		curl -fsSL https://api.github.com/repos/mikefarah/yq/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")')
+
+.PHONY: update/zlib
+## update zlib version
+update/zlib:
+	$(call fetch-version,$(ROOTDIR)/versions/ZLIB_VERSION,\
+		curl -fsSL https://api.github.com/repos/madler/zlib/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/v//g')
+
+.PHONY: update/hdf5
+## update hdf5 version
+update/hdf5:
+	$(call fetch-version,$(ROOTDIR)/versions/HDF5_VERSION,\
+		curl -fsSL https://api.github.com/repos/HDFGroup/hdf5/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")' \
+		| sed 's/v//g')
+
+.PHONY: update/vald
+## update vald it's self version
+update/vald:
+	$(call fetch-version,$(ROOTDIR)/versions/VALD_VERSION,\
+		curl -fsSL https://api.github.com/repos/$(REPO)/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")')
+
+.PHONY: update/snapshotter
+## update snapshotter version
+update/snapshotter:
+	$(call fetch-version,$(ROOTDIR)/versions/SNAPSHOTTER_VERSION,\
+		curl -fsSL https://api.github.com/repos/kubernetes-csi/external-snapshotter/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")')
+
+.PHONY: update/csi-driver-host-path
+## update csi-driver-host-path version
+update/csi-driver-host-path:
+	$(call fetch-version,$(ROOTDIR)/versions/CSI_DRIVER_HOST_PATH_VERSION,\
+		curl -fsSL https://api.github.com/repos/kubernetes-csi/csi-driver-host-path/releases/latest \
+		| grep -Po '"tag_name": "\K.*?(?=")')
+
+.PHONY: update/template
+## update PULL_REQUEST_TEMPLATE and ISSUE_TEMPLATE
+# Reference the version variables directly instead of $(shell $(MAKE) -s
+# version/X). GNU make executes any recipe line containing $(MAKE) even under
+# -n (the recursive-make exception), so the old form ran these seds during a
+# dry run — and the inner sub-make, inheriting -n via MAKEFLAGS, returned the
+# recipe text ("echo v1.7.17") instead of the value, corrupting the templates.
+# These vars are what the version/* targets echo, so the result is identical.
+update/template:
+	$(call update-template,Vald,$(VERSION))
+	$(call update-template,Go,v$(GO_VERSION))
+	$(call update-template,Rust,v$(RUST_VERSION))
+	$(call update-template,Docker,$(DOCKER_VERSION))
+	$(call update-template,Kubernetes,$(KUBECTL_VERSION))
+	$(call update-template,Helm,$(HELM_VERSION))
+	$(call update-template,NGT,v$(NGT_VERSION))
+	$(call update-template,Faiss,v$(FAISS_VERSION))
+
+.PHONY: deps
+## resolve dependencies
+deps: \
+	proto/deps \
+	deps/install
+
+.PHONY: deps/install
+## install dependencies
+deps/install: \
+	crlfmt/install \
+	golines/install \
+	gofumpt/install \
+	strictgoimports/install \
+	goimports/install \
+	prettier/install \
+	go/deps \
+	go/example/deps \
+	rust/deps

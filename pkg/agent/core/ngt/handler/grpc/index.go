@@ -1,0 +1,214 @@
+// Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+package grpc
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/vdaas/vald/apis/grpc/v1/payload"
+	"github.com/vdaas/vald/internal/errors"
+	"github.com/vdaas/vald/internal/info"
+	"github.com/vdaas/vald/internal/log"
+	"github.com/vdaas/vald/internal/net/grpc/codes"
+	"github.com/vdaas/vald/internal/net/grpc/errdetails"
+	"github.com/vdaas/vald/internal/net/grpc/errhandler"
+	"github.com/vdaas/vald/internal/net/grpc/status"
+	"github.com/vdaas/vald/internal/observability/trace"
+)
+
+func (s *server) CreateIndex(
+	ctx context.Context, c *payload.Control_CreateIndexRequest,
+) (res *payload.Empty, err error) {
+	ctx, span := trace.StartSpan(ctx, apiName+".CreateIndex")
+	defer trace.End(span)
+	res = new(payload.Empty)
+	err = s.ngt.CreateIndex(ctx, c.GetPoolSize())
+	if err != nil {
+		var (
+			code    codes.Code
+			details = []any{
+				&errdetails.RequestInfo{
+					ServingData: errdetails.Serialize(c),
+				},
+				s.resourceInfo(ngtResourceType + "/ngt.CreateIndex"),
+			}
+		)
+
+		switch {
+		case errors.Is(err, errors.ErrUncommittedIndexNotFound):
+			err = status.WrapWithFailedPrecondition(fmt.Sprintf("CreateIndex API failed to create indexes pool_size = %d due to the precondition failure, error: %v", c.GetPoolSize(), err), err,
+				append(details, &errdetails.PreconditionFailure{
+					Violations: []*errdetails.PreconditionFailureViolation{
+						{
+							Type:    "uncommitted index is empty",
+							Subject: "failed to CreateIndex operation caused by empty uncommitted indices",
+						},
+					},
+				}, info.Get())...)
+			code = codes.FailedPrecondition
+		case errors.Is(err, errors.ErrFlushingIsInProgress):
+			err = status.WrapWithAborted("CreateIndex API aborted to process create indexes request due to flushing indices is in progress", err, details...)
+			code = codes.Aborted
+		case errors.Is(err, context.Canceled):
+			err = status.WrapWithCanceled(fmt.Sprintf("CreateIndex API canceled to create indexes pool_size = %d, error: %v", c.GetPoolSize(), err), err, details...)
+			code = codes.Canceled
+		case errors.Is(err, context.DeadlineExceeded):
+			err = status.WrapWithDeadlineExceeded(fmt.Sprintf("CreateIndex API deadline exceeded to create indexes pool_size = %d, error: %v", c.GetPoolSize(), err), err, details...)
+			code = codes.DeadlineExceeded
+		default:
+			err = status.WrapWithInternal(fmt.Sprintf("CreateIndex API failed to create indexes pool_size = %d, error: %v", c.GetPoolSize(), err), err, append(details, info.Get())...)
+			code = codes.Internal
+			log.Error(err)
+		}
+		return errhandler.HandleError[payload.Empty](span, code, err)
+	}
+	return res, nil
+}
+
+func (s *server) SaveIndex(ctx context.Context, _ *payload.Empty) (res *payload.Empty, err error) {
+	ctx, span := trace.StartSpan(ctx, apiName+".SaveIndex")
+	defer trace.End(span)
+	res = new(payload.Empty)
+	err = s.ngt.SaveIndex(ctx)
+	if err != nil {
+		log.Error(err)
+		err = status.WrapWithInternal("SaveIndex API failed to save indices", err,
+			s.resourceInfo(ngtResourceType+"/ngt.SaveIndex"), info.Get())
+		log.Error(err)
+		return errhandler.HandleError[payload.Empty](span, codes.Internal, err)
+	}
+	return res, nil
+}
+
+func (s *server) CreateAndSaveIndex(
+	ctx context.Context, c *payload.Control_CreateIndexRequest,
+) (res *payload.Empty, err error) {
+	ctx, span := trace.StartSpan(ctx, apiName+".CreateAndSaveIndex")
+	defer trace.End(span)
+	res = new(payload.Empty)
+	err = s.ngt.CreateAndSaveIndex(ctx, c.GetPoolSize())
+	if err != nil {
+		var (
+			code    codes.Code
+			details = []any{
+				&errdetails.RequestInfo{
+					ServingData: errdetails.Serialize(c),
+				},
+				s.resourceInfo(ngtResourceType + "/ngt.CreateAndSaveIndex"),
+			}
+		)
+
+		switch {
+		case errors.Is(err, errors.ErrUncommittedIndexNotFound):
+			err = status.WrapWithFailedPrecondition(fmt.Sprintf("CreateAndSaveIndex API failed to create indexes pool_size = %d due to the precondition failure, error: %v", c.GetPoolSize(), err), err,
+				append(details, &errdetails.PreconditionFailure{
+					Violations: []*errdetails.PreconditionFailureViolation{
+						{
+							Type:    "uncommitted index is empty",
+							Subject: "failed to CreateAndSaveIndex operation caused by empty uncommitted indices",
+						},
+					},
+				}, info.Get())...)
+			code = codes.FailedPrecondition
+		case errors.Is(err, errors.ErrFlushingIsInProgress):
+			err = status.WrapWithAborted("CreateAndSaveIndex API aborted to process create indexes request due to flushing indices is in progress", err, details...)
+			code = codes.Aborted
+		case errors.Is(err, context.Canceled):
+			err = status.WrapWithCanceled(fmt.Sprintf("CreateAndSaveIndex API canceled to create indexes pool_size = %d, error: %v", c.GetPoolSize(), err), err, details...)
+			code = codes.Canceled
+		case errors.Is(err, context.DeadlineExceeded):
+			err = status.WrapWithDeadlineExceeded(fmt.Sprintf("CreateAndSaveIndex API deadline exceeded to create indexes pool_size = %d, error: %v", c.GetPoolSize(), err), err, details...)
+			code = codes.DeadlineExceeded
+		default:
+			err = status.WrapWithInternal(fmt.Sprintf("CreateAndSaveIndex API failed to create indexes pool_size = %d, error: %v", c.GetPoolSize(), err), err, append(details, info.Get())...)
+			code = codes.Internal
+		}
+		log.Error(err)
+		errhandler.RecordSpanError(span, code, err)
+	}
+	return res, nil
+}
+
+func (s *server) IndexInfo(
+	ctx context.Context, _ *payload.Empty,
+) (res *payload.Info_Index_Count, err error) {
+	_, span := trace.StartSpan(ctx, apiName+".IndexInfo")
+	defer trace.End(span)
+	return &payload.Info_Index_Count{
+		Stored:      uint32(s.ngt.Len()),
+		Uncommitted: uint32(s.ngt.InsertVQueueBufferLen() + s.ngt.DeleteVQueueBufferLen()),
+		Indexing:    s.ngt.IsIndexing(),
+		Saving:      s.ngt.IsSaving(),
+	}, nil
+}
+
+func (s *server) IndexDetail(
+	ctx context.Context, _ *payload.Empty,
+) (res *payload.Info_Index_Detail, err error) {
+	_, span := trace.StartSpan(ctx, apiName+".IndexDetail")
+	defer trace.End(span)
+	res = &payload.Info_Index_Detail{
+		Counts:     make(map[string]*payload.Info_Index_Count),
+		Replica:    1,
+		LiveAgents: 1,
+	}
+	res.Counts[s.name] = &payload.Info_Index_Count{
+		Stored:      uint32(s.ngt.Len()),
+		Uncommitted: uint32(s.ngt.InsertVQueueBufferLen() + s.ngt.DeleteVQueueBufferLen()),
+		Indexing:    s.ngt.IsIndexing(),
+		Saving:      s.ngt.IsSaving(),
+	}
+	return res, nil
+}
+
+func (s *server) IndexStatistics(
+	ctx context.Context, _ *payload.Empty,
+) (res *payload.Info_Index_Statistics, err error) {
+	_, span := trace.StartSpan(ctx, apiName+".IndexStatistics")
+	defer trace.End(span)
+	return s.ngt.IndexStatistics()
+}
+
+func (s *server) IndexStatisticsDetail(
+	ctx context.Context, _ *payload.Empty,
+) (res *payload.Info_Index_StatisticsDetail, err error) {
+	_, span := trace.StartSpan(ctx, apiName+".IndexStatisticsDetail")
+	defer trace.End(span)
+	stats, err := s.ngt.IndexStatistics()
+	if err != nil {
+		return nil, err
+	}
+	return &payload.Info_Index_StatisticsDetail{
+		Details: map[string]*payload.Info_Index_Statistics{
+			s.name: stats,
+		},
+	}, nil
+}
+
+func (s *server) IndexProperty(
+	ctx context.Context, _ *payload.Empty,
+) (res *payload.Info_Index_PropertyDetail, err error) {
+	_, span := trace.StartSpan(ctx, apiName+".IndexStatisticsDetail")
+	defer trace.End(span)
+	prop, err := s.ngt.IndexProperty()
+	if err != nil {
+		return nil, err
+	}
+	return &payload.Info_Index_PropertyDetail{
+		Details: map[string]*payload.Info_Index_Property{
+			s.name: prop,
+		},
+	}, nil
+}

@@ -1,0 +1,148 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+name: "Run E2E Max Dimension test"
+on:
+  push:
+    tags:
+      - "*.*.*"
+      - "v*.*.*"
+      - "*.*.*-*"
+      - "v*.*.*-*"
+  pull_request:
+    types:
+      - "labeled"
+jobs:
+  dump-contexts-to-log:
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    runs-on: ubuntu-slim
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/dump-context
+  detect-ci-container:
+    permissions:
+      contents: read
+    if: startsWith( github.ref, 'refs/tags/') || github.event.action == 'labeled' && github.event.label.name == 'actions/e2e-max-dim'
+    uses: ./.github/workflows/_detect-ci-container.yaml
+  e2e-max-dimension-insert:
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    name: "E2E test (Max Dimension Insert: skip strict exist check)"
+    needs: [detect-ci-container]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/vdaas/vald/vald-dev-container:${{ needs.detect-ci-container.outputs.TAG }}
+      credentials:
+        username: ${{ secrets.PACKAGE_USER }}
+        password: ${{ secrets.PACKAGE_TOKEN }}
+      options: "--add-host host.docker.internal:host-gateway"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set Git config
+        run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+      - name: Setup E2E environment
+        id: setup_e2e
+        uses: ./.github/actions/setup-e2e
+      - name: Run E2E MaxDimension
+        run: |
+          go get github.com/vdaas/vald-client-go/v1/payload
+          go get github.com/vdaas/vald-client-go/v1/vald
+          BIT=18
+          RELEASE=`helm list | grep vald | awk '{print $1}'`
+          while [ $BIT -ne 32 ]; do
+            echo "Start: Bit=${BIT}"
+            FILE="tmp.log"
+            touch ${FILE}
+            FILEPATH=`readlink -f ${FILE}`
+            DIM=$((1<<$BIT))
+            if [ $BIT = "32" ]; then
+              DIM=$(($DIM-1))
+            fi
+
+            make k8s/vald/deploy HELM_VALUES=${VALUES} HELM_EXTRA_OPTIONS="--set agent.ngt.dimension=${DIM} ${HELM_EXTRA_OPTIONS}"
+
+            sleep 3
+
+            kubectl rollout restart statefulset vald-agent
+
+            sleep 30
+
+            kubectl wait --for=condition=Ready pod -l ${WAIT_FOR_SELECTOR} --timeout=${WAIT_FOR_TIMEOUT}
+            # e2e/v2/maxdim (tests/v2/e2e's config-based max-dimension scenario,
+            # see tests/v2/e2e/assets/max_vector_dim.yaml) treats a
+            # ResourceExhausted Insert response as a legitimate boundary result
+            # rather than a test failure, so `go test` always exits 0 on a
+            # clean boundary hit; unlike the removed v1 `e2e/maxdim` target it
+            # has no `-file` flag to report the outcome, so the boundary is
+            # detected here by grepping the captured test log instead. See
+            # tests/v2/e2e/crud/grpc_test.go printCallback/emptyCallback,
+            # which logs the raw gRPC error (containing "ResourceExhausted")
+            # even when the expect assertion for it passes.
+            set +e
+            make E2E_BIND_PORT=8081 \
+              E2E_MAX_DIM_BIT=${BIT} \
+              E2E_TARGET_NAMESPACE=default \
+              e2e/v2/maxdim 2>&1 | tee ${FILEPATH}
+            RESULT=${PIPESTATUS[0]}
+            set -e
+            if grep -q "ResourceExhausted" ${FILEPATH}; then
+              echo "Finish: Bit=${BIT} with ResourceExhausted (boundary reached)"
+              BIT=$(($BIT-1))
+              rm ${FILEPATH}
+              break;
+            fi
+            if [ ${RESULT} -ne 0 ]; then
+              echo "Finish: Bit=${BIT} with Error: exit code ${RESULT}"
+              rm ${FILEPATH}
+              break;
+            fi
+            echo "Finish: Bit=${BIT}"
+            BIT=$(($BIT+1))
+            rm ${FILEPATH}
+
+            echo "removing cluster"
+            make k8s/vald/delete HELM_VALUES=${VALUES} HELM_EXTRA_OPTIONS="${HELM_EXTRA_OPTIONS}"
+          done
+          echo "MAX_BIT=${BIT}" >> $GITHUB_OUTPUT
+          echo "MAX_BIT=${BIT}"
+        env:
+          HELM_EXTRA_OPTIONS: ${{ steps.setup_e2e.outputs.HELM_EXTRA_OPTIONS }}
+          WAIT_FOR_SELECTOR: app=vald-agent
+          WAIT_FOR_TIMEOUT: 29m
+          VALUES: .github/helm/values/values-max-dim.yaml
+  slack-notification:
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    name: "Slack notification"
+    needs: [e2e-max-dimension-insert]
+    runs-on: ubuntu-slim
+    if: startsWith( github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/notify-slack
+        with:
+          author_name: "E2E max dim test"
+          slack_notify_webhook_url: ${{ secrets.SLACK_NOTIFY_WEBHOOK_URL }}

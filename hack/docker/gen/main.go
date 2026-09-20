@@ -1,0 +1,1308 @@
+// Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io/fs"
+	"os/signal"
+	"slices"
+	"syscall"
+	"text/template"
+	"time"
+
+	"github.com/vdaas/vald/internal/conv"
+	"github.com/vdaas/vald/internal/errors"
+	"github.com/vdaas/vald/internal/file"
+	"github.com/vdaas/vald/internal/log"
+	"github.com/vdaas/vald/internal/os"
+	"github.com/vdaas/vald/internal/safety"
+	"github.com/vdaas/vald/internal/strings"
+	"github.com/vdaas/vald/internal/sync"
+	"github.com/vdaas/vald/internal/sync/errgroup"
+	"golang.org/x/tools/go/packages"
+	"gopkg.in/yaml.v2"
+)
+
+const (
+	agent               = "agent"
+	agentFaiss          = agent + "-faiss"
+	agentNGT            = agent + "-ngt"
+	agentSidecar        = agent + "-sidecar"
+	bench               = "benchmark"
+	benchJob            = bench + "-job"
+	benchOperator       = bench + "-operator"
+	binfmt              = "binfmt"
+	buildbase           = "buildbase"
+	buildkit            = "buildkit"
+	buildkitSyftScanner = buildkit + "-syft-scanner"
+	devContainer        = "dev-container"
+	exampleContainer    = "example-client"
+	discovererK8s       = "discoverer-k8s"
+	gateway             = "gateway"
+	gatewayFilter       = gateway + "-filter"
+	gatewayLb           = gateway + "-lb"
+	gatewayMirror       = gateway + "-mirror"
+	helmOperator        = "helm-operator"
+	index               = "index"
+	indexCorrection     = index + "-correction"
+	indexCreation       = index + "-creation"
+	indexDeletion       = index + "-deletion"
+	indexOperator       = index + "-operator"
+	indexSave           = index + "-save"
+	managerIndex        = "manager-" + index
+	readreplicaRotate   = "readreplica-rotate"
+	e2e                 = "e2e"
+
+	vald                  = "vald"
+	organization          = "vdaas"
+	repository            = organization + "/" + vald
+	defaultBinaryDir      = "/usr/bin"
+	usrLocal              = "/usr/local"
+	usrLocalBinaryDir     = usrLocal + "/bin"
+	usrLocalLibDir        = usrLocal + "/lib"
+	defaultBuilderImage   = "ghcr.io/" + organization + "/" + vald + "/" + vald + "-" + buildbase
+	defaultBuilderTag     = "nightly"
+	defaultLanguage       = "en_US.UTF-8"
+	defaultMaintainer     = organization + ".org " + vald + " team <" + vald + "@" + organization + ".org>"
+	defaultRuntimeImage   = "gcr.io/distroless/static"
+	nonrootUser           = "nonroot"
+	rootUser              = "root"
+	defaultRuntimeTag     = nonrootUser
+	defaultRuntimeUser    = nonrootUser + ":" + nonrootUser
+	defaultBuildUser      = rootUser + ":" + rootUser
+	defaultBuildStageName = "builder"
+	maintainerKey         = "MAINTAINER"
+	minimumArgumentLength = 2
+	buildkitVersion       = "v0.32.2"
+	syftScannerVersion    = "1.12.0"
+	ubuntuVersion         = "24.04"
+
+	yearKey = "YEAR"
+
+	goWorkdir   = "${GOPATH}/src/github.com"
+	rustWorkdir = "${HOME}/rust/src/github.com"
+
+	ngtPreprocess = "make ngt/install"
+	// CC=clang selects ThinLTO + lld automatically (LTO_FLAGS/LLD_FLAGS in the
+	// root Makefile, and the ngt/install recipe's own -fuse-ld=lld). Do NOT set
+	// CFLAGS/CXXFLAGS here: env-set CFLAGS defeats the Makefile's `?=` AVX-512
+	// guard (the exact class of bug fixed in a9f79519f).
+	ngtClangLTOPreprocess = `CC=clang CXX=clang++ make ngt/install`
+	faissPreprocess       = "make faiss/install"
+	usearchPreprocess     = "make usearch/install"
+
+	helmOperatorRootdir   = "/opt/helm"
+	helmOperatorWatchFile = helmOperatorRootdir + "/watches.yaml"
+	helmOperatorChartsDir = helmOperatorRootdir + "/charts"
+
+	apisProtoPath = "apis/proto/**"
+
+	hackPath = "hack/**"
+
+	chartsValdPath            = "charts/" + vald
+	helmOperatorPath          = "charts/operator/helm"
+	chartPath                 = chartsValdPath + "/Chart.yaml"
+	valuesPath                = chartsValdPath + "/values.yaml"
+	templatesPath             = chartsValdPath + "/templates/**"
+	helmOperatorChartPath     = helmOperatorPath + "/Chart.yaml"
+	helmOperatorValuesPath    = helmOperatorPath + "/values.yaml"
+	helmOperatorTemplatesPath = helmOperatorPath + "/templates/**"
+
+	goModPath          = "go.mod"
+	goSumPath          = "go.sum"
+	trivyConfigPath    = "trivy.yaml"
+	trivyIgnoreDirPath = ".trivyignore.d"
+
+	cargoLockPath       = "rust/Cargo.lock"
+	cargoTomlPath       = "rust/Cargo.toml"
+	rustBinAgentDirPath = "rust/bin/agent"
+	rustNgtRsPath       = "rust/libs/ngt-rs/**"
+	rustNgtPath         = "rust/libs/ngt/**"
+	rustProtoPath       = "rust/libs/proto/**"
+
+	excludeTestFilesPath = "!**/*_test.go"
+	excludeMockFilesPath = "!**/*_mock.go"
+
+	e2eV2TestPath = "tests/v2"
+
+	versionsPath           = "versions"
+	operatorSDKVersionPath = versionsPath + "/OPERATOR_SDK_VERSION"
+	goVersionPath          = versionsPath + "/GO_VERSION"
+	rustVersionPath        = versionsPath + "/RUST_VERSION"
+	faissVersionPath       = versionsPath + "/FAISS_VERSION"
+	ngtVersionPath         = versionsPath + "/NGT_VERSION"
+	// usearchVersionPath     = versionsPath + "/USEARCH_VERSION" // TODO Future work.
+
+	makefilePath    = "Makefile"
+	makefileDirPath = makefilePath + ".d/**"
+
+	amd64Platform  = "linux/amd64"
+	arm64Platform  = "linux/arm64"
+	multiPlatforms = amd64Platform + "," + arm64Platform
+
+	header = `#
+# Copyright (C) 2019-{{.Year}} {{.Maintainer}}
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#`
+)
+
+var license = template.Must(template.New("license").Parse(header + `
+
+# DO_NOT_EDIT this workflow file is generated by https://github.com/` + repository + `/blob/main/hack/docker/gen/main.go
+
+`))
+
+var docker = template.Must(template.New("Dockerfile").Funcs(template.FuncMap{
+	"RunCommands": func(commands []string) string {
+		if len(commands) == 0 {
+			return ""
+		}
+		var b strings.Builder
+		for i, cmd := range commands {
+			if i > 0 {
+				b.WriteString(" \\\n    && ")
+			}
+			b.WriteString(cmd)
+		}
+		return b.String()
+	},
+	"RunMounts": func(commands []string) string {
+		if len(commands) == 0 {
+			return ""
+		}
+		var b strings.Builder
+		for i, cmd := range commands {
+			if i > 0 {
+				b.WriteString(" \\\n    ")
+			}
+			b.WriteString(cmd)
+		}
+		return b.String()
+	},
+
+	"Entrypoint": func(entries []string) string {
+		if len(entries) == 0 {
+			return "\"{{.BinDir}}/{{.AppName}}\""
+		}
+		return "\"" + strings.Join(entries, "\", \"") + "\""
+	},
+	"ContainerName": func(c ContainerType) string {
+		return c.String()
+	},
+}).Parse(fmt.Sprintf(`# syntax = docker/dockerfile:latest
+# check=error=true
+%s
+
+# DO_NOT_EDIT this Dockerfile is generated by https://github.com/`+repository+`/blob/main/hack/docker/gen/main.go
+
+{{- if .AliasImage }}
+# skipcq: DOK-DL3007
+FROM {{.BuilderImage}}:{{.BuilderTag}} AS {{.BuildStageName}}
+{{- else}}
+ARG UPX_OPTIONS=-9
+
+{{- range $key, $value := .Arguments }}
+ARG {{$key}}={{$value}}
+{{- end}}
+{{- range $image := .ExtraImages }}
+# skipcq: DOK-DL3026,DOK-DL3007
+FROM {{$image}}
+{{- end}}
+# skipcq: DOK-DL3026,DOK-DL3007
+FROM {{.BuilderImage}}:{{.BuilderTag}}{{if not (eq (ContainerName .ContainerType) "%s")}} AS {{.BuildStageName}} {{- end}}
+LABEL maintainer="{{.Maintainer}}"
+# skipcq: DOK-DL3002
+USER {{.BuildUser}}
+ARG TARGETARCH
+ARG TARGETOS
+ARG GO_VERSION
+ARG RUST_VERSION
+ARG BUILDKIT_SBOM_SCAN_STAGE=true
+ARG BUILDKIT_SBOM_SCAN_CONTEXT=true
+{{- range $keyValue := .EnvironmentsSlice }}
+ENV {{$keyValue}}
+{{- end}}
+WORKDIR {{.RootDir}}/${ORG}/${REPO}
+{{- range $files := .ExtraCopies }}
+COPY {{$files}}
+{{- end}}
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+#skipcq: DOK-W1001, DOK-SC2046, DOK-SC2086, DOK-DL3008
+RUN {{RunMounts .RunMounts}} \
+    set -ex \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache \
+    && echo 'APT::Install-Recommends "false";' > /etc/apt/apt.conf.d/no-install-recommends \
+    && apt-get clean \
+    && apt-get update -y \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends --fix-missing \
+    build-essential \
+    ca-certificates \
+    curl \
+{{- if eq (ContainerName .ContainerType) "%s"}}
+    gnupg \
+{{- end}}
+    tzdata \
+    locales \
+    git \
+{{- range $epkg := .ExtraPackages }}
+    {{$epkg}} \
+{{- end}}
+    && ldconfig \
+    && echo "${LANG} UTF-8" > /etc/locale.gen \
+    && ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime \
+    && locale-gen ${LANGUAGE} \
+    && update-locale LANG=${LANGUAGE} \
+    && dpkg-reconfigure -f noninteractive tzdata \
+    && apt-get clean \
+    && apt-get autoclean -y \
+    && apt-get autoremove -y \
+    && {{RunCommands .RunCommands}}
+{{- if not (eq (ContainerName .ContainerType) "%s")}}
+# skipcq: DOK-DL3026,DOK-DL3007
+FROM {{.RuntimeImage}}:{{.RuntimeTag}}
+LABEL maintainer="{{.Maintainer}}"
+COPY --from=builder {{.BinDir}}/{{.AppName}} {{.BinDir}}/{{.AppName}}
+{{- if .ConfigExists }}
+COPY cmd/{{.PackageDir}}/sample.yaml /etc/server/config.yaml
+{{- end}}
+{{- range $from, $file := .StageFiles }}
+COPY --from=builder {{$file}} {{$file}}
+{{- end}}
+{{- end}}
+# skipcq: DOK-DL3002
+USER {{.RuntimeUser}}
+{{- if .Entrypoints}}
+ENTRYPOINT [{{Entrypoint .Entrypoints}}]
+{{- else if not (eq (ContainerName .ContainerType) "%s")}}
+ENTRYPOINT ["{{.BinDir}}/{{.AppName}}"]
+{{- end}}
+{{- end}}`, header, DevContainer.String(),
+	DevContainer.String(),
+	DevContainer.String(),
+	DevContainer.String())))
+
+type (
+	Workflow struct {
+		Jobs Jobs   `yaml:"jobs"`
+		Name string `yaml:"name"`
+		On   On     `yaml:"on"`
+	}
+
+	On struct {
+		Schedule          Schedule    `yaml:"schedule,omitempty"`
+		Push              Push        `yaml:"push"`
+		PullRequest       PullRequest `yaml:"pull_request"`
+		PullRequestTarget PullRequest `yaml:"pull_request_target"`
+	}
+
+	Schedule []struct {
+		Cron string `yaml:"cron,omitempty"`
+	}
+
+	Push struct {
+		Branches []string `yaml:"branches"`
+		Tags     []string `yaml:"tags"`
+	}
+
+	PullRequest struct {
+		Types Types `yaml:"types,omitempty"`
+		Paths Paths `yaml:"paths"`
+	}
+
+	Jobs struct {
+		Build Build `yaml:"build"`
+	}
+
+	Build struct {
+		Secrets     map[string]string `yaml:"secrets,omitempty"`
+		Permissions map[string]string `yaml:"permissions"`
+		With        With              `yaml:"with"`
+		Uses        string            `yaml:"uses"`
+	}
+
+	With struct {
+		Target    string `yaml:"target"`
+		Platforms string `yaml:"platforms,omitempty"`
+	}
+
+	Types []string
+	Paths []string
+
+	Data struct {
+		Arguments         map[string]string
+		Environments      map[string]string
+		RootDir           string
+		BuildPlatforms    string
+		AppName           string
+		BinDir            string
+		RuntimeTag        string
+		BuildStageName    string
+		BuildUser         string
+		BuilderImage      string
+		BuilderTag        string
+		Maintainer        string
+		Name              string
+		PackageDir        string
+		RuntimeImage      string
+		RuntimeUser       string
+		Preprocess        []string
+		ExtraImages       []string
+		StageFiles        []string
+		RunMounts         []string
+		Entrypoints       []string
+		EnvironmentsSlice []string
+		ExtraCopies       []string
+		RunCommands       []string
+		ExtraPackages     []string
+		PullRequestPaths  []string
+		ContainerType     ContainerType
+		Year              int
+		AliasImage        bool
+		ConfigExists      bool
+	}
+	ContainerType int
+)
+
+const (
+	Go ContainerType = iota
+	Rust
+	DevContainer
+	HelmOperator
+	Other
+)
+
+func (c ContainerType) String() string {
+	return containerTypeName[c]
+}
+
+var (
+	containerTypeName = map[ContainerType]string{
+		Go:           "Go",
+		Rust:         "Rust",
+		DevContainer: "DevContainer",
+		HelmOperator: "HelmOperator",
+		Other:        "Other",
+	}
+
+	defaultEnvironments = map[string]string{
+		"DEBIAN_FRONTEND": "noninteractive",
+		"HOME":            "/" + rootUser,
+		"USER":            rootUser,
+		"INITRD":          "No",
+		"LANG":            defaultLanguage,
+		"LANGUAGE":        defaultLanguage,
+		"LC_ALL":          defaultLanguage,
+		"ORG":             organization,
+		"TZ":              "Etc/UTC",
+		"PATH":            "${PATH}:" + usrLocalBinaryDir,
+		"REPO":            vald,
+	}
+	goDefaultEnvironments = map[string]string{
+		"GOROOT":      "/opt/go",
+		"GOPATH":      "/go",
+		"GO111MODULE": "on",
+		"PATH":        "${PATH}:${GOROOT}/bin:${GOPATH}/bin:" + usrLocalBinaryDir,
+	}
+	rustDefaultEnvironments = map[string]string{
+		"RUST_HOME":   usrLocalLibDir + "/rust",
+		"RUSTUP_HOME": "${RUST_HOME}/rustup",
+		"CARGO_HOME":  "${RUST_HOME}/cargo",
+		"PATH":        "${PATH}:${RUSTUP_HOME}/bin:${CARGO_HOME}/bin:" + usrLocalBinaryDir,
+	}
+	clangDefaultEnvironments = map[string]string{
+		"CC":  "gcc",
+		"CXX": "g++",
+	}
+	clangLTOEnvironments = map[string]string{
+		"RUSTFLAGS": `"-Clinker=clang -Clink-arg=-fuse-ld=lld"`,
+	}
+	goInstallCommands = []string{
+		"make GOPATH=\"${GOPATH}\" GOROOT=\"${GOROOT}\" GO_VERSION=\"${GO_VERSION}\" go/install",
+		"make GOPATH=\"${GOPATH}\" GOROOT=\"${GOROOT}\" GO_VERSION=\"${GO_VERSION}\" go/download",
+	}
+	rustInstallCommands = []string{
+		"make RUST_VERSION=\"${RUST_VERSION}\" rust/install",
+	}
+	goBuildCommands = []string{
+		"make GOARCH=\"${TARGETARCH}\" GOOS=\"${TARGETOS}\" REPO=\"${ORG}/${REPO}\" NAME=\"${REPO}\" cmd/${PKG}/${APP_NAME}",
+		"mv \"cmd/${PKG}/${APP_NAME}\" \"{{$.BinDir}}/${APP_NAME}\"",
+	}
+	goExampleBuildCommands = []string{
+		"make GOARCH=\"${TARGETARCH}\" GOOS=\"${TARGETOS}\" REPO=\"${ORG}/${REPO}\" NAME=\"${REPO}\" ${PKG}/${APP_NAME}",
+		"mv \"${PKG}/${APP_NAME}\" \"{{$.BinDir}}/${APP_NAME}\"",
+	}
+	rustBuildCommands = []string{
+		"make rust/target/release/${APP_NAME}",
+		"mv \"rust/target/release/${APP_NAME}\" \"{{$.BinDir}}/${APP_NAME}\"",
+		"rm -rf rust/target",
+	}
+	e2eBuildCommands = []string{
+		"make GOARCH=\"${TARGETARCH}\" GOOS=\"${TARGETOS}\" REPO=\"${ORG}/${REPO}\" NAME=\"${REPO}\" ${PKG}/${APP_NAME}",
+		"mv \"${PKG}/${APP_NAME}\" \"{{$.BinDir}}/${APP_NAME}\"",
+	}
+
+	defaultMounts = []string{
+		"--mount=type=bind,target=.,rw",
+		"--mount=type=tmpfs,target=/tmp",
+		"--mount=type=cache,target=/var/lib/apt,sharing=locked,id=lib-${APP_NAME}-${TARGETARCH}",
+		"--mount=type=cache,target=/var/cache/apt,sharing=locked,id=cache-${APP_NAME}-${TARGETARCH}",
+	}
+	goDefaultMounts = []string{
+		"--mount=type=cache,target=\"${GOPATH}/pkg\",id=\"go-pkg-${TARGETARCH}\"",
+		"--mount=type=cache,target=\"${HOME}/.cache/go-build\",id=\"go-build-${TARGETARCH}\"",
+		"--mount=type=tmpfs,target=\"${GOPATH}/src\"",
+	}
+
+	clangBuildDeps = []string{
+		"cmake",
+		"g++",
+		"gcc",
+		"libssl-dev",
+		"unzip",
+	}
+	ngtBuildDeps = []string{
+		"liblapack-dev",
+		"libomp-dev",
+		"libopenblas-dev",
+		"gfortran",
+	}
+	rustBuildDeps = []string{
+		"pkgconf",
+		"protobuf-compiler",
+		"libprotobuf-dev",
+	}
+	clangLTOBuildDeps = []string{
+		"clang",
+		"lld",
+		"llvm",
+	}
+	devContainerDeps = []string{
+		"file",
+		"gawk",
+		"git-lfs",
+		"gnupg2",
+		"graphviz",
+		"jq",
+		"libaec-dev",
+		"pigz",
+		"sed",
+		"zip",
+	}
+
+	devContainerPreprocess = []string{
+		"make gopls/install",
+		"update-ca-certificates",
+		"make bun/install",
+		"make GOARCH=${TARGETARCH} GOOS=${TARGETOS} deps GO_CLEAN_DEPS=false",
+		"make GOARCH=${TARGETARCH} GOOS=${TARGETOS} golangci-lint/install",
+		"make go/tools/install",
+		"make cmake/install",
+		"make hdf5/install",
+		"make helm-docs/install",
+		"make helm/install",
+		"make k3d/install",
+		"make kind/install",
+		"make kubectl/install",
+		"make kubelinter/install",
+		"make minikube/install",
+		"make reviewdog/install",
+		"make telepresence/install",
+		"make yq/install",
+		"make docker-cli/install",
+	}
+)
+
+func appendM[K comparable](maps ...map[K]string) map[K]string {
+	if len(maps) == 0 {
+		return nil
+	}
+	result := maps[0]
+	for _, m := range maps[1:] {
+		for k, v := range m {
+			ev, ok := result[k]
+			if ok && !strings.Contains(v, ev) {
+				v += ":" + ev
+			}
+			result[k] = v
+		}
+	}
+
+	for k, v := range result {
+		vs := strings.Split(v, ":")
+		slices.Sort(vs)
+		v = strings.Join(slices.Compact(vs), ":")
+		if strings.Contains(v, "${PATH}:") {
+			v = strings.TrimPrefix(strings.ReplaceAll(strings.ReplaceAll(v, "${PATH}", ""), "::", ":")+":${PATH}", ":")
+		}
+		if strings.Contains(v, ":unix") {
+			v = "unix:" + strings.TrimSuffix(v, ":unix")
+		}
+		result[k] = v
+	}
+	return result
+}
+
+// extractVariables efficiently extracts variables from strings.
+func extractVariables(value string) []string {
+	var vars []string
+	start := -1
+	for i := 0; i < len(value); i++ {
+		switch {
+		case strings.HasPrefix(value[i:], "${"):
+			start = i + 2
+		case start != -1 && value[i] == '}':
+			vars = append(vars, value[start:i])
+			start = -1
+		case value[i] == '$' && start == -1:
+			end := variableNameEnd(value, i+1)
+			vars = append(vars, value[i+1:end])
+			i = end - 1
+			start = -1
+		}
+	}
+	return vars
+}
+
+func variableNameEnd(value string, start int) int {
+	for start < len(value) && isVariableCharacter(value[start]) {
+		start++
+	}
+	return start
+}
+
+func isVariableCharacter(char byte) bool {
+	return ('a' <= char && char <= 'z') ||
+		('A' <= char && char <= 'Z') ||
+		('0' <= char && char <= '9') ||
+		char == '_'
+}
+
+// topologicalSort sorts the elements topologically and ensures that equal-level nodes are sorted by name.
+func topologicalSort(envMap map[string]string) []string {
+	inDegree := make(map[string]int)         // Tracks the in-degree of each node
+	graph := make(map[string][]string)       // Tracks the edges between nodes
+	result := make([]string, 0, len(envMap)) // Result slice pre-allocated for efficiency
+
+	gl := 0
+	// Initialize the graph structure and in-degrees
+	for key, value := range envMap {
+		vars := extractVariables(value)
+		for _, refKey := range vars {
+			if refKey != key { // Prevent self-dependency
+				graph[refKey] = append(graph[refKey], key)
+				if len(graph[refKey]) > gl {
+					gl = len(graph[refKey])
+				}
+				inDegree[key]++
+			}
+		}
+	}
+
+	// Initialize the queue with nodes having in-degree 0 (no dependencies)
+	queue := make([]string, 0, len(envMap)-len(graph))
+	for key := range envMap {
+		if inDegree[key] == 0 {
+			queue = append(queue, key)
+		}
+	}
+
+	// Sort the initial queue to maintain lexicographical order for nodes with no dependencies
+	slices.Sort(queue)
+
+	// Preallocate a reusable slice for collecting new nodes
+	newNodes := make([]string, 0, gl)
+	// Topological sort process
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+
+		// Append the result as `node=value`
+		if value, exists := envMap[node]; exists {
+			result = append(result, node+"="+value)
+		}
+
+		// Process all neighbors and decrement their in-degrees
+		for _, neighbor := range graph[node] {
+			inDegree[neighbor]--
+			if inDegree[neighbor] == 0 {
+				newNodes = append(newNodes, neighbor)
+			}
+		}
+
+		// If new nodes were found, sort them and append to the queue
+		if len(newNodes) > 0 {
+			slices.Sort(newNodes) // Sort new nodes only once
+			queue = append(queue, newNodes...)
+			newNodes = newNodes[:0] // Reuse the slice by resetting it
+		}
+	}
+
+	return result
+}
+
+func appendGoPullRequestPaths(rootDir string, data *Data) {
+	mainFile := file.Join(rootDir, "cmd", data.PackageDir, "main.go")
+	if !file.Exists(mainFile) {
+		return
+	}
+	ns, err := buildDependencyTree(rootDir, mainFile)
+	if err != nil {
+		log.Error(err)
+	}
+	pkgs := make([]string, 0, len(ns)+1)
+	pkgs = append(pkgs, file.Join("cmd", data.PackageDir))
+	for _, pnode := range ns {
+		pkgs = append(pkgs, pnode.ToSlice()...)
+	}
+	slices.Sort(pkgs)
+	pkgs = slices.Compact(pkgs)
+	root, err := os.Getwd()
+	if err != nil {
+		root = os.Getenv("HOME")
+	}
+	if root != "" && !strings.HasSuffix(root, string(os.PathSeparator)) {
+		root += string(os.PathSeparator)
+	}
+	for i, pkg := range pkgs {
+		const splitWord = "/" + repository + "/"
+		pkg = file.Join(pkg, "*.go")
+		index := strings.LastIndex(pkg, splitWord)
+		if index != -1 {
+			pkg = pkg[index+len(splitWord):]
+		}
+		if root != "" {
+			pkg = strings.TrimPrefix(pkg, root)
+		}
+		pkgs[i] = pkg
+	}
+	data.PullRequestPaths = append(data.PullRequestPaths, pkgs...)
+}
+
+func setPullRequestPaths(rootDir string, data *Data) {
+	switch data.ContainerType {
+	case HelmOperator:
+		data.PullRequestPaths = append(data.PullRequestPaths,
+			chartPath, valuesPath, templatesPath, helmOperatorChartPath,
+			helmOperatorValuesPath, helmOperatorTemplatesPath, operatorSDKVersionPath)
+	case DevContainer:
+		data.PullRequestPaths = append(data.PullRequestPaths,
+			apisProtoPath, hackPath, goModPath, goSumPath, goVersionPath,
+			trivyConfigPath)
+	case Go:
+		data.PullRequestPaths = append(data.PullRequestPaths,
+			apisProtoPath, goModPath, goSumPath, goVersionPath,
+			excludeTestFilesPath, excludeMockFilesPath)
+		appendGoPullRequestPaths(rootDir, data)
+	case Rust:
+		data.PullRequestPaths = append(data.PullRequestPaths,
+			apisProtoPath, cargoLockPath, cargoTomlPath, rustBinAgentDirPath,
+			rustNgtRsPath, rustNgtPath, rustProtoPath, rustVersionPath)
+	case Other:
+	}
+	trivyIgnorePath := file.Join(trivyIgnoreDirPath, data.Name)
+	if file.Exists(file.Join(rootDir, trivyIgnorePath)) {
+		data.PullRequestPaths = append(data.PullRequestPaths, trivyIgnorePath)
+	}
+	if strings.EqualFold(data.Name, agentFaiss) || data.ContainerType == Rust {
+		data.PullRequestPaths = append(data.PullRequestPaths, faissVersionPath)
+	}
+	if strings.EqualFold(data.Name, agentNGT) || data.ContainerType == Rust {
+		data.PullRequestPaths = append(data.PullRequestPaths, ngtVersionPath)
+	}
+	if !data.AliasImage {
+		data.PullRequestPaths = append(data.PullRequestPaths, makefilePath, makefileDirPath)
+	}
+}
+
+func generateWorkflow(
+	ctx context.Context, rootDir, name, maintainer string, year int, data Data,
+) error {
+	data.Name = strings.TrimPrefix(name, vald+"-")
+	setPullRequestPaths(rootDir, &data)
+	if data.AliasImage {
+		data.BuildPlatforms = multiPlatforms
+	}
+	data.Year = year
+	data.Maintainer = maintainer
+
+	log.Infof("Generating %s's workflow", data.Name)
+	workflow := new(Workflow)
+	err := yaml.Unmarshal(conv.Atob(`name: "Build docker image: `+data.Name+`"
+on:
+  schedule:
+    - cron: "0 * * * *"
+  push:
+    branches:
+      - "main"
+      - "release/v*.*"
+      - "!release/v*.*.*"
+    tags:
+      - "*.*.*"
+      - "*.*.*-*"
+      - "v*.*.*"
+      - "v*.*.*-*"
+  pull_request:
+    paths:
+      - ".github/actions/docker-build/action.yaml"
+      - ".github/actions/prepare-docker-build/action.yaml"
+      - ".github/workflows/_docker-image.yaml"
+      - ".github/workflows/dockers-`+data.Name+`-image.yaml"
+      - "dockers/`+data.PackageDir+`/Dockerfile"
+      - "hack/docker/gen/main.go"
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled]
+    paths: []
+
+jobs:
+  build:
+    uses: "./.github/workflows/_docker-image.yaml"
+    with:
+      target: "`+data.Name+`"
+      platforms: ""
+`), &workflow)
+	if err != nil {
+		return errors.Wrap(err, "failed to decode YAML")
+	}
+	if !data.AliasImage {
+		workflow.On.Schedule = nil
+	}
+	workflow.On.PullRequest.Paths = append(workflow.On.PullRequest.Paths, data.PullRequestPaths...)
+	if strings.EqualFold(data.Name, exampleContainer) {
+		workflow.On.PullRequest.Paths = slices.DeleteFunc(workflow.On.PullRequest.Paths, func(path string) bool {
+			return strings.HasPrefix(path, "cmd") || strings.HasPrefix(path, "pkg")
+		})
+		workflow.On.PullRequest.Paths = append(workflow.On.PullRequest.Paths, data.PackageDir+"/**")
+	}
+	slices.Sort(workflow.On.PullRequest.Paths)
+	workflow.On.PullRequest.Paths = slices.Compact(workflow.On.PullRequest.Paths)
+	workflow.On.PullRequestTarget.Paths = workflow.On.PullRequest.Paths
+	workflow.Jobs.Build.With.Platforms = data.BuildPlatforms
+	workflow.Jobs.Build.Permissions = map[string]string{
+		"contents": "read", "security-events": "write",
+	}
+	//nolint:gosec // GitHub Actions expressions, not credential values.
+	workflow.Jobs.Build.Secrets = map[string]string{
+		"PACKAGE_USER": "${{ secrets.PACKAGE_USER }}", "PACKAGE_TOKEN": "${{ secrets.PACKAGE_TOKEN }}",
+		"DOCKERHUB_USER": "${{ secrets.DOCKERHUB_USER }}", "DOCKERHUB_PASS": "${{ secrets.DOCKERHUB_PASS }}",
+		"SLACK_NOTIFY_WEBHOOK_URL": "${{ secrets.SLACK_NOTIFY_WEBHOOK_URL }}",
+	}
+	workflowYAML, err := yaml.Marshal(workflow)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal workflow struct to YAML")
+	}
+	workflowYAML = conv.Atob(strings.Replace(string(workflowYAML), "\"on\":", "on:", 1))
+	if len(header) > int(^uint(0)>>1)-len(workflowYAML) {
+		return errors.New("size computation for allocation may overflow")
+	}
+	buf := bytes.NewBuffer(make([]byte, 0, len(header)+len(workflowYAML)))
+	if err = license.Execute(buf, data); err != nil {
+		return errors.Wrap(err, "failed to execute template")
+	}
+	buf.WriteString("\n")
+	buf.Write(workflowYAML)
+	fileName := file.Join(rootDir, ".github/workflows", "dockers-"+data.Name+"-image.yaml")
+	if _, err = file.OverWriteFile(ctx, fileName, buf, fs.ModePerm); err != nil {
+		return errors.Wrapf(err, "failed to writing workflow file for %s", fileName)
+	}
+	return nil
+}
+
+func setContainerDefaults(data *Data, maintainer string, year int) {
+	data.Maintainer = maintainer
+	data.Year = year
+	if data.BinDir == "" {
+		data.BinDir = defaultBinaryDir
+	}
+	if data.RuntimeImage == "" {
+		data.RuntimeImage = defaultRuntimeImage
+	}
+	if data.RuntimeTag == "" {
+		data.RuntimeTag = defaultRuntimeTag
+	}
+	if data.BuilderImage == "" {
+		data.BuilderImage = defaultBuilderImage
+	}
+	if data.BuilderTag == "" {
+		data.BuilderTag = defaultBuilderTag
+	}
+	if data.RuntimeUser == "" {
+		data.RuntimeUser = defaultRuntimeUser
+	}
+	if data.BuildUser == "" {
+		data.BuildUser = defaultBuildUser
+	}
+	if data.BuildStageName == "" {
+		data.BuildStageName = defaultBuildStageName
+	}
+	if data.Environments == nil {
+		data.Environments = make(map[string]string, len(defaultEnvironments))
+	}
+	data.Environments = appendM(data.Environments, defaultEnvironments)
+}
+
+func setGoContainerBuild(rootDir string, data *Data) {
+	data.Environments = appendM(data.Environments, goDefaultEnvironments)
+	data.RootDir = goWorkdir
+	commands := make([]string, 0, len(goInstallCommands)+len(data.Preprocess)+len(goBuildCommands))
+	commands = append(commands, goInstallCommands...)
+	commands = append(commands, data.Preprocess...)
+	switch {
+	case file.Exists(file.Join(rootDir, "cmd", data.PackageDir)):
+		commands = append(commands, goBuildCommands...)
+	case strings.HasPrefix(data.PackageDir, "example") && file.Exists(file.Join(rootDir, data.PackageDir)):
+		commands = append(commands, goExampleBuildCommands...)
+	case strings.HasPrefix(data.PackageDir, e2eV2TestPath+"/"+e2e) && file.Exists(file.Join(rootDir, data.PackageDir)):
+		commands = append(commands, e2eBuildCommands...)
+	}
+	data.RunCommands = commands
+	data.RunMounts = append(append(make([]string, 0, len(defaultMounts)+len(goDefaultMounts)), defaultMounts...), goDefaultMounts...)
+}
+
+func setContainerBuild(rootDir string, data *Data) {
+	switch data.ContainerType {
+	case Go:
+		setGoContainerBuild(rootDir, data)
+	case Rust:
+		data.Environments = appendM(data.Environments, rustDefaultEnvironments, clangLTOEnvironments)
+		data.RootDir = rustWorkdir
+		data.RunCommands = append(
+			append(append(make([]string, 0, len(rustInstallCommands)+len(data.Preprocess)+len(rustBuildCommands)), rustInstallCommands...), data.Preprocess...),
+			rustBuildCommands...)
+		data.RunMounts = defaultMounts
+	case DevContainer:
+		data.Environments = appendM(data.Environments, goDefaultEnvironments, rustDefaultEnvironments, clangDefaultEnvironments)
+		data.RootDir = goWorkdir
+		commands := make([]string, 0, len(goInstallCommands)+len(rustInstallCommands)+len(data.Preprocess)+1)
+		commands = append(commands, goInstallCommands...)
+		commands = append(commands, rustInstallCommands...)
+		commands = append(commands, data.Preprocess...)
+		commands = append(commands, "rm -rf {{.RootDir}}/${ORG}/${REPO}/*")
+		data.RunCommands = commands
+		data.RunMounts = append(append(make([]string, 0, len(defaultMounts)+len(goDefaultMounts)), defaultMounts...), goDefaultMounts...)
+	case HelmOperator:
+		data.Environments = appendM(data.Environments, goDefaultEnvironments)
+		data.RootDir = goWorkdir
+		data.RunCommands = append(append(make([]string, 0, len(goInstallCommands)+len(data.Preprocess)), goInstallCommands...), data.Preprocess...)
+		data.RunMounts = append(append(make([]string, 0, len(defaultMounts)+len(goDefaultMounts)), defaultMounts...), goDefaultMounts...)
+	case Other:
+		data.RootDir = "${HOME}"
+		data.Environments["ROOTDIR"] = rootDir
+	}
+	if strings.Contains(data.BuildUser, rootUser) {
+		data.Environments["HOME"] = "/" + rootUser
+		data.Environments["USER"] = rootUser
+	} else {
+		user, _, _ := strings.Cut(data.BuildUser, ":")
+		data.Environments["HOME"] = "/home/" + user
+		data.Environments["USER"] = user
+	}
+}
+
+func generateDockerfile(
+	ctx context.Context, rootDir, name, maintainer string, year int, data Data,
+) error {
+	setContainerDefaults(&data, maintainer, year)
+	setContainerBuild(rootDir, &data)
+	data.Environments["APP_NAME"] = data.AppName
+	data.Environments["PKG"] = data.PackageDir
+	data.EnvironmentsSlice = topologicalSort(data.Environments)
+	data.ConfigExists = file.Exists(file.Join(rootDir, "cmd", data.PackageDir, "sample.yaml"))
+
+	buf := bytes.NewBuffer(make([]byte, 0, 1024))
+	log.Infof("Generating %s's Dockerfile", name)
+	if err := docker.Execute(buf, data); err != nil {
+		return errors.Wrap(err, "failed to execute Dockerfile template")
+	}
+	tpl := buf.String()
+	buf.Reset()
+	if err := template.Must(template.New("Dockerfile").Parse(tpl)).Execute(buf, data); err != nil {
+		return errors.Wrap(err, "failed to execute rendered Dockerfile template")
+	}
+	buf.WriteString("\n")
+	fileName := file.Join(rootDir, "dockers", data.PackageDir, "Dockerfile")
+	if _, err := file.OverWriteFile(ctx, fileName, buf, fs.ModePerm); err != nil {
+		return errors.Wrapf(err, "failed to writing Dockerfile for %s", fileName)
+	}
+	return nil
+}
+
+func main() {
+	log.Init()
+	if err := run(); err != nil {
+		log.Error(err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	if len(os.Args) < minimumArgumentLength {
+		return errors.New("invalid argument")
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT,
+		syscall.SIGQUIT,
+		syscall.SIGHUP,
+		syscall.SIGALRM,
+		syscall.SIGKILL,
+		syscall.SIGTERM)
+	defer cancel()
+
+	maintainer := os.Getenv(maintainerKey)
+	if maintainer == "" {
+		maintainer = defaultMaintainer
+	}
+	var year int
+	if yearString := os.Getenv(yearKey); yearString == "" {
+		year = time.Now().Year()
+	} else {
+		y, err := time.Parse("2006", yearString)
+		if err != nil {
+			return err
+		}
+		year = y.Year()
+	}
+	eg, egctx := errgroup.New(ctx)
+	for n, d := range map[string]Data{
+		vald + "-" + agentNGT: {
+			AppName:    "ngt",
+			PackageDir: agent + "/core/ngt",
+			// RuntimeImage:  "gcr.io/distroless/cc-debian12",
+			// clang/lld/llvm (clangLTOBuildDeps) so CC auto-detect builds the
+			// agent with clang + ThinLTO + lld, statically linked against LLVM
+			// libomp. This is safe once -ffast-math is off the link line (its
+			// crtfastmath.o constructor, not the toolchain, was what crashed
+			// the static binary at startup); libomp-dev in ngtBuildDeps lets
+			// NGT's FindOpenMP resolve -lomp for the clang build.
+			ExtraPackages: append(clangBuildDeps,
+				append(ngtBuildDeps, clangLTOBuildDeps...)...),
+			Preprocess: []string{ngtPreprocess},
+		},
+		vald + "-" + agentFaiss: {
+			AppName:    "faiss",
+			PackageDir: agent + "/core/faiss",
+			// RuntimeImage:  "gcr.io/distroless/cc-debian12",
+			ExtraPackages: append(clangBuildDeps,
+				append(ngtBuildDeps, clangLTOBuildDeps...)...),
+			Preprocess: []string{faissPreprocess},
+		},
+		vald + "-" + agent: {
+			AppName:       agent,
+			PackageDir:    agent + "/core/" + agent,
+			ContainerType: Rust,
+			RuntimeImage:  "gcr.io/distroless/cc-debian12",
+			ExtraPackages: append(clangBuildDeps,
+				append(ngtBuildDeps,
+					append(rustBuildDeps, clangLTOBuildDeps...)...)...),
+			Preprocess: []string{
+				ngtClangLTOPreprocess,
+				faissPreprocess,
+			},
+		},
+		vald + "-" + agentSidecar: {
+			AppName:    "sidecar",
+			PackageDir: "agent/sidecar",
+		},
+		vald + "-" + discovererK8s: {
+			AppName:    "discoverer",
+			PackageDir: "discoverer/k8s",
+		},
+		vald + "-" + gatewayLb: {
+			AppName:    "lb",
+			PackageDir: "gateway/lb",
+		},
+		vald + "-" + gatewayFilter: {
+			AppName:    "filter",
+			PackageDir: "gateway/filter",
+		},
+		vald + "-" + gatewayMirror: {
+			AppName:    "mirror",
+			PackageDir: "gateway/mirror",
+		},
+		vald + "-" + managerIndex: {
+			AppName:    "index",
+			PackageDir: "manager/index",
+		},
+		vald + "-" + indexCorrection: {
+			AppName:    "index-correction",
+			PackageDir: "index/job/correction",
+		},
+		vald + "-" + indexCreation: {
+			AppName:    "index-creation",
+			PackageDir: "index/job/creation",
+		},
+		vald + "-" + indexSave: {
+			AppName:    "index-save",
+			PackageDir: "index/job/save",
+		},
+		vald + "-" + indexDeletion: {
+			AppName:    "index-deletion",
+			PackageDir: "index/job/deletion",
+		},
+		vald + "-index-exportation": {
+			AppName:    "index-exportation",
+			PackageDir: "index/job/exportation",
+		},
+		vald + "-" + readreplicaRotate: {
+			AppName:    readreplicaRotate,
+			PackageDir: "index/job/readreplica/rotate",
+		},
+		vald + "-" + indexOperator: {
+			AppName:    indexOperator,
+			PackageDir: "index/operator",
+		},
+		vald + "-operator": {
+			AppName:    vald + "-operator",
+			PackageDir: "operator/vald",
+		},
+		vald + "-" + benchJob: {
+			AppName:       "job",
+			PackageDir:    "tools/benchmark/job",
+			ExtraPackages: append(clangBuildDeps, "libaec-dev"),
+			Preprocess: []string{
+				"make hdf5/install",
+			},
+		},
+		vald + "-" + benchOperator: {
+			AppName:    "operator",
+			PackageDir: "operator/benchmark",
+		},
+		vald + "-" + helmOperator: {
+			AppName:       "helm-operator",
+			PackageDir:    "operator/helm",
+			ContainerType: HelmOperator,
+			Arguments: map[string]string{
+				"OPERATOR_SDK_VERSION": "latest",
+			},
+			ExtraCopies: []string{
+				"--from=operator " + usrLocalBinaryDir + "/${APP_NAME} {{$.BinDir}}/${APP_NAME}",
+			},
+			ExtraImages: []string{
+				"quay.io/operator-framework/helm-operator:${OPERATOR_SDK_VERSION} AS operator",
+			},
+			ExtraPackages: []string{"upx"},
+			Preprocess: []string{
+				"mkdir -p " + helmOperatorChartsDir,
+				`{ \
+        echo "---"; \
+        echo "- version: v1"; \
+        echo "  group: vald.vdaas.org"; \
+        echo "  kind: ValdRelease"; \
+        echo "  chart: ` + helmOperatorChartsDir + `/` + vald + `"; \
+        echo "- version: v1"; \
+        echo "  group: vald.vdaas.org"; \
+        echo "  kind: ValdHelmOperatorRelease"; \
+        echo "  chart: ` + helmOperatorChartsDir + `/` + vald + `-helm-operator"; \
+    } > ` + helmOperatorWatchFile,
+				"make GOARCH=${TARGETARCH} GOOS=${TARGETOS} helm/schema/" + vald,
+				"make GOARCH=${TARGETARCH} GOOS=${TARGETOS} helm/schema/operator/helm",
+				"cp -r " + chartsValdPath + " " + helmOperatorChartsDir + "/" + vald,
+				"cp -r " + helmOperatorPath + " " + helmOperatorChartsDir + "/" + vald + "-helm-operator",
+				"upx \"{{$.BinDir}}/${APP_NAME}\"",
+			},
+			StageFiles: []string{
+				helmOperatorWatchFile,
+				helmOperatorChartsDir + "/" + vald,
+				helmOperatorChartsDir + "/" + vald + "-helm-operator",
+			},
+			Entrypoints: []string{"{{$.BinDir}}/{{.AppName}}", "run", "--watches-file=" + helmOperatorWatchFile},
+		},
+		vald + "-" + devContainer: {
+			AppName:       devContainer,
+			BuilderImage:  "ubuntu",
+			BuilderTag:    ubuntuVersion,
+			BuildUser:     defaultBuildUser,
+			RuntimeUser:   defaultBuildUser,
+			ContainerType: DevContainer,
+			PackageDir:    "dev",
+			ExtraPackages: append([]string{"sudo"}, append(clangBuildDeps,
+				append(ngtBuildDeps,
+					append(rustBuildDeps,
+						devContainerDeps...)...)...)...),
+			Preprocess: append(devContainerPreprocess,
+				ngtPreprocess,
+				faissPreprocess,
+				usearchPreprocess),
+		},
+		vald + "-" + exampleContainer: {
+			AppName:       "client",
+			PackageDir:    "example/client",
+			ExtraPackages: append(clangBuildDeps, "libaec-dev"),
+			Preprocess: []string{
+				"make hdf5/install",
+			},
+		},
+		vald + "-" + e2e: {
+			AppName:       e2e,
+			PackageDir:    e2eV2TestPath + "/" + e2e,
+			ExtraPackages: append(clangBuildDeps, "libaec-dev"),
+			Preprocess: []string{
+				"make hdf5/install",
+			},
+		},
+		vald + "-" + buildbase: {
+			AppName:      buildbase,
+			AliasImage:   true,
+			PackageDir:   buildbase,
+			BuilderImage: "ubuntu",
+			BuilderTag:   "latest",
+		},
+		vald + "-" + buildkit: {
+			AppName:      buildkit,
+			AliasImage:   true,
+			PackageDir:   buildkit,
+			BuilderImage: "moby/" + buildkit,
+			BuilderTag:   buildkitVersion,
+		},
+		vald + "-" + binfmt: {
+			AppName:      binfmt,
+			AliasImage:   true,
+			PackageDir:   binfmt,
+			BuilderImage: "tonistiigi/" + binfmt,
+			BuilderTag:   "master",
+		},
+		vald + "-" + buildkitSyftScanner: {
+			AppName:        "scanner",
+			AliasImage:     true,
+			PackageDir:     buildkit + "/syft/scanner",
+			BuilderImage:   "docker/" + buildkitSyftScanner,
+			BuilderTag:     syftScannerVersion,
+			BuildStageName: "scanner",
+		},
+	} {
+		name := n
+		data := d
+
+		eg.Go(safety.RecoverFunc(func() error {
+			return generateWorkflow(egctx, os.Args[1], name, maintainer, year, data)
+		}))
+
+		eg.Go(safety.RecoverFunc(func() error {
+			return generateDockerfile(egctx, os.Args[1], name, maintainer, year, data)
+		}))
+	}
+	return eg.Wait()
+}
+
+// PackageNode represents a node in the dependency tree.
+type PackageNode struct {
+	Name    string
+	Imports []*PackageNode
+}
+
+// ToSlice traverses the dependency tree and returns all dependencies as a slice.
+func (n PackageNode) ToSlice() (pkgs []string) {
+	pkgs = make([]string, 0, len(n.Imports)+1)
+	if n.Name != "command-line-arguments" {
+		pkgs = append(pkgs, n.Name)
+	}
+	for _, node := range n.Imports {
+		pkgs = append(pkgs, node.ToSlice()...)
+	}
+	return pkgs
+}
+
+// String returns string of the dependency tree in a readable format.
+func (n PackageNode) String() string {
+	return n.render(0)
+}
+
+func (n PackageNode) render(depth int) (tree string) {
+	tree = fmt.Sprintf("%s- %s\n", strings.Repeat("  ", depth), n.Name)
+	for _, node := range n.Imports {
+		tree += node.render(depth + 1)
+	}
+	return tree
+}
+
+// processDependencies processes package dependencies while avoiding duplicate processing.
+func processDependencies(
+	pkg *packages.Package,
+	nodes map[string]*PackageNode,
+	mu *sync.Mutex,
+	checkList map[string]*PackageNode,
+	wg *sync.WaitGroup,
+) *PackageNode {
+	if !strings.Contains(pkg.PkgPath, repository) && pkg.Name != "main" {
+		return nil
+	}
+	if node, exists := checkList[pkg.PkgPath]; exists {
+		return node
+	}
+
+	node := &PackageNode{Name: pkg.PkgPath}
+	nodes[pkg.PkgPath] = node
+	checkList[pkg.PkgPath] = node
+	for _, imp := range pkg.Imports {
+		if !strings.Contains(imp.PkgPath, repository) {
+			continue
+		}
+		if child, exists := checkList[imp.PkgPath]; exists {
+			node.Imports = append(node.Imports, child)
+			continue
+		}
+		child := processDependencies(imp, nodes, mu, checkList, wg)
+		if child != nil {
+			node.Imports = append(node.Imports, child)
+		}
+	}
+
+	return node
+}
+
+// buildDependencyTree constructs a dependency tree for multiple entry packages.
+func buildDependencyTree(rootDir, entryFile string) ([]*PackageNode, error) {
+	cfg := &packages.Config{
+		Mode: packages.NeedName | packages.NeedImports | packages.NeedDeps,
+		Dir:  rootDir,
+	}
+
+	// Use entry file (e.g., main.go) as the root for analysis.
+	pkgs, err := packages.Load(cfg, entryFile)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes := make(map[string]*PackageNode)
+	checkList := make(map[string]*PackageNode, len(pkgs)) // Tracks processed packages
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// Process all entry packages
+	var roots []*PackageNode
+	for _, pkg := range pkgs {
+		root := processDependencies(pkg, nodes, &mu, checkList, &wg)
+		if root != nil {
+			roots = append(roots, root)
+		}
+	}
+	wg.Wait()
+
+	return roots, nil
+}

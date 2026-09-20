@@ -1,0 +1,213 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# @schema {"name": "name", "type": "string"}
+# name -- name of the deployment
+name: vald-helm-operator
+# @schema {"name": "replicas", "type": "integer"}
+# replicas -- number of replicas
+replicas: 2
+# @schema {"name": "image", "type": "object"}
+image:
+  # @schema {"name": "image.registry", "type": "string"}
+  # image.registry -- image registry (e.g. "myregistry.example.com")
+  registry: ""
+  # @schema {"name": "image.repository", "type": "string"}
+  # image.repository -- image repository
+  repository: vdaas/vald-helm-operator
+  # @schema {"name": "image.tag", "type": "string"}
+  # image.tag -- image tag
+  tag: v1.8.0
+  # @schema {"name": "image.pullPolicy", "type": "string", "enum": ["Always", "Never", "IfNotPresent"]}
+  # image.pullPolicy -- image pull policy
+  pullPolicy: Always
+# @schema {"name": "rbac", "type": "object"}
+rbac:
+  # @schema {"name": "rbac.create", "type": "boolean"}
+  # rbac.create -- required roles and rolebindings will be created
+  create: true
+  # @schema {"name": "rbac.name", "type": "string"}
+  # rbac.name -- name of roles and rolebindings
+  name: vald-helm-operator
+# @schema {"name": "serviceAccount", "type": "object"}
+serviceAccount:
+  # @schema {"name": "serviceAccount.create", "type": "boolean"}
+  # serviceAccount.create -- service account will be created
+  create: true
+  # @schema {"name": "serviceAccount.name", "type": "string"}
+  # serviceAccount.name -- name of service account
+  name: vald-helm-operator
+# @schema {"name": "service", "type": "object"}
+service:
+  # @schema {"name": "service.enabled", "type": "boolean"}
+  # service.enabled -- service enabled
+  enabled: true
+  # @schema {"name": "service.annotations", "type": "object"}
+  # service.annotations -- service annotations
+  annotations: {}
+  # @schema {"name": "service.labels", "type": "object"}
+  # service.labels -- service labels
+  labels: {}
+  # @schema {"name": "service.type", "type": "string", "enum": ["ClusterIP", "LoadBalancer", "NodePort"]}
+  # service.type -- service type: ClusterIP, LoadBalancer or NodePort
+  type: ClusterIP
+  # @schema {"name": "service.externalTrafficPolicy", "type": "string"}
+  # service.externalTrafficPolicy -- external traffic policy (can be specified when service type is LoadBalancer or NodePort) : Cluster or Local
+  externalTrafficPolicy: ""
+# @schema {"name": "annotations", "type": "object"}
+# annotations -- deployment annotations
+annotations: {}
+# @schema {"name": "podAnnotations", "type": "object"}
+# podAnnotations -- pod annotations
+podAnnotations: {}
+# @schema {"name": "securityContext", "type": "object"}
+# securityContext -- security context for container
+securityContext:
+  runAsUser: 65532
+  runAsNonRoot: true
+  runAsGroup: 65532
+  privileged: false
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+# @schema {"name": "podSecurityContext", "type": "object"}
+# podSecurityContext -- security context for pod
+podSecurityContext:
+  runAsUser: 65532
+  runAsNonRoot: true
+  runAsGroup: 65532
+  fsGroup: 65532
+  fsGroupChangePolicy: "OnRootMismatch"
+# @schema {"name": "resources", "type": "object"}
+# resources -- kubernetes resources of pod
+resources:
+  limits:
+    cpu: 300m
+    memory: 300Mi
+  requests:
+    cpu: 200m
+    memory: 200Mi
+# @schema {"name": "nodeSelector", "type": "object"}
+# nodeSelector -- node labels for pod assignment
+nodeSelector: {}
+# @schema {"name": "tolerations", "type": "array", "items": {"type": "object"}}
+# tolerations -- tolerations
+tolerations: []
+# @schema {"name": "affinity", "type": "object"}
+# affinity -- affinity
+affinity: {}
+# @schema {"name": "enableLeaderElection", "type": "boolean"}
+# enableLeaderElection -- enable leader election for controller manager.
+enableLeaderElection: true
+# @schema {"name": "leaderElectionID", "type": "string"}
+# leaderElectionID -- name of the configmap that is used for holding the leader lock.
+leaderElectionID: vald-helm-operator
+# @schema {"name": "reconcilePeriod", "type": "string"}
+# reconcilePeriod -- reconcile duration of operator
+reconcilePeriod: 1m
+# @schema {"name": "enableMetrics", "type": "boolean"}
+# enableMetrics -- enable metrics endpoint
+enableMetrics: true
+# @schema {"name": "healthPort", "type": "integer"}
+# healthPort -- port of health endpoint
+healthPort: 8081
+# @schema {"name": "metricsPort", "type": "integer"}
+# metricsPort -- port of metrics endpoint
+metricsPort: 6061
+# @schema {"name": "maxConcurrentReconciles", "type": "integer"}
+# maxConcurrentReconciles -- max number of concurrent reconciles
+maxConcurrentReconciles: 1
+# @schema {"name": "namespaced", "type": "boolean"}
+# namespaced -- if it is true, operator will behave as a namespace-scoped operator, if it is false, it will behave as a cluster-scoped operator.
+namespaced: true
+# @schema {"name": "watchNamespaces", "type": "string"}
+# watchNamespaces -- comma separated names of namespaces to watch, if it is empty, the namespace that the operator exists in is used.
+watchNamespaces: ""
+# @schema {"name": "logging", "type": "object"}
+logging:
+  # @schema {"name": "logging.level", "type": "string", "enum": ["debug", "info", "error"]}
+  # logging.level -- logging level of operator (debug, info, or error)
+  level: info
+  # @schema {"name": "logging.stacktraceLevel", "type": "string", "enum": ["debug", "info", "error"]}
+  # logging.stacktraceLevel -- minimum log level triggers stacktrace generation
+  stacktraceLevel: error
+  # @schema {"name": "logging.format", "type": "string", "enum": ["console", "json"]}
+  # logging.format -- logging format of operator (console or json)
+  format: console
+# @schema {"name": "livenessProbe", "type": "object"}
+livenessProbe:
+  # @schema {"name": "livenessProbe.enabled", "type": "boolean"}
+  # livenessProbe.enabled -- enable liveness probe.
+  enabled: true
+  # @schema {"name": "livenessProbe.httpGet", "type": "object"}
+  httpGet:
+    # @schema {"name": "livenessProbe.httpGet.path", "type": "string"}
+    # livenessProbe.httpGet.path -- readiness probe path
+    path: /healthz
+    # @schema {"name": "livenessProbe.httpGet.port", "type": "string"}
+    # livenessProbe.httpGet.port -- readiness probe port
+    port: health
+    # @schema {"name": "livenessProbe.httpGet.scheme", "type": "string"}
+    # livenessProbe.httpGet.scheme -- readiness probe scheme
+    scheme: HTTP
+  # @schema {"name": "livenessProbe.initialDelaySeconds", "type": "integer"}
+  # livenessProbe.initialDelaySeconds -- liveness probe initial delay seconds
+  initialDelaySeconds: 15
+  # @schema {"name": "livenessProbe.periodSeconds", "type": "integer"}
+  # livenessProbe.periodSeconds -- liveness probe period seconds
+  periodSeconds: 20
+  # @schema {"name": "livenessProbe.successThreshold", "type": "integer"}
+  # livenessProbe.successThreshold -- liveness probe success threshold
+  successThreshold: 1
+  # @schema {"name": "livenessProbe.failureThreshold", "type": "integer"}
+  # livenessProbe.failureThreshold -- liveness probe failure threshold
+  failureThreshold: 2
+  # @schema {"name": "livenessProbe.timeoutSeconds", "type": "integer"}
+  # livenessProbe.timeoutSeconds -- liveness probe timeout seconds
+  timeoutSeconds: 5
+# @schema {"name": "readinessProbe", "type": "object"}
+readinessProbe:
+  # @schema {"name": "readinessProbe.enabled", "type": "boolean"}
+  # readinessProbe.enabled -- enable readiness probe.
+  enabled: true
+  # @schema {"name": "readinessProbe.httpGet", "type": "object"}
+  httpGet:
+    # @schema {"name": "readinessProbe.httpGet.path", "type": "string"}
+    # readinessProbe.httpGet.path -- readiness probe path
+    path: /readyz
+    # @schema {"name": "readinessProbe.httpGet.port", "type": "string"}
+    # readinessProbe.httpGet.port -- readiness probe port
+    port: health
+    # @schema {"name": "readinessProbe.httpGet.scheme", "type": "string"}
+    # readinessProbe.httpGet.scheme -- readiness probe scheme
+    scheme: HTTP
+  # @schema {"name": "readinessProbe.initialDelaySeconds", "type": "integer"}
+  # readinessProbe.initialDelaySeconds -- liveness probe initial delay seconds
+  initialDelaySeconds: 5
+  # @schema {"name": "readinessProbe.periodSeconds", "type": "integer"}
+  # readinessProbe.periodSeconds -- liveness probe period seconds
+  periodSeconds: 10
+  # @schema {"name": "readinessProbe.successThreshold", "type": "integer"}
+  # readinessProbe.successThreshold -- liveness probe success threshold
+  successThreshold: 1
+  # @schema {"name": "readinessProbe.failureThreshold", "type": "integer"}
+  # readinessProbe.failureThreshold -- liveness probe failure threshold
+  failureThreshold: 2
+  # @schema {"name": "readinessProbe.timeoutSeconds", "type": "integer"}
+  # readinessProbe.timeoutSeconds -- liveness probe timeout seconds
+  timeoutSeconds: 5

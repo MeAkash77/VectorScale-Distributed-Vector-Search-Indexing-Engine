@@ -1,0 +1,91 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+defaults:
+  grpc:
+    client:
+      health_check_duration: 50ms
+      dial_option:
+        enable_backoff: true
+  server_config:
+    healths:
+      liveness:
+        livenessProbe:
+          timeoutSeconds: 10
+          failureThreshold: 5
+      readiness:
+        readinessProbe:
+          timeoutSeconds: 10
+          failureThreshold: 5
+gateway:
+  lb:
+    enabled: true
+    ingress:
+      enabled: true
+      host: "host.docker.internal"
+    service:
+      # NOTE: https://doc.traefik.io/traefik/routing/providers/kubernetes-ingress/#on-service
+      annotations:
+        traefik.ingress.kubernetes.io/service.serversscheme: h2c
+    minReplicas: 2
+    hpa:
+      enabled: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 50Mi
+    gateway_config:
+      index_replica: 3
+      discoverer:
+        duration: 50ms
+agent:
+  minReplicas: 5
+  maxReplicas: 10
+  podManagementPolicy: Parallel
+  persistentVolume:
+    enabled: true
+    storageClass: local-path
+    accessMode: ReadWriteOnce
+    size: 200Mi
+  hpa:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 50Mi
+  ngt:
+    index_path: "/var/ngt/index"
+    enable_in_memory_mode: false
+    auto_index_duration_limit: 3m
+    auto_index_check_duration: 1m
+    auto_index_length: 1000
+    dimension: 784
+discoverer:
+  minReplicas: 2
+  hpa:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 50Mi
+  discoverer:
+    discovery_duration: 50ms
+manager:
+  index:
+    replicas: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 30Mi

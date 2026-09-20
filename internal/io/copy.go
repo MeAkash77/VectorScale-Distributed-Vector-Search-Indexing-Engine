@@ -1,0 +1,152 @@
+// Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package io
+
+import (
+	"bytes"
+	"io"
+	"math"
+	"sync/atomic"
+	"syscall"
+
+	"github.com/vdaas/vald/internal/errors"
+	"github.com/vdaas/vald/internal/sync"
+)
+
+var cio = NewCopier(0)
+
+func Copy(dst io.Writer, src io.Reader) (written int64, err error) {
+	return cio.Copy(dst, src)
+}
+
+func CopyBuffer(dst io.Writer, src io.Reader, buf []byte) (written int64, err error) {
+	return cio.CopyBuffer(dst, src, buf)
+}
+
+type Copier interface {
+	Copy(dst io.Writer, src io.Reader) (written int64, err error)
+	CopyBuffer(dst io.Writer, src io.Reader, buf []byte) (written int64, err error)
+}
+
+type copier struct {
+	pool    sync.Pool
+	bufSize int64
+}
+
+var defaultBufferSize int = 16 * syscall.Getpagesize()
+
+func NewCopier(size int) Copier {
+	c := new(copier)
+	if size > 0 {
+		atomic.StoreInt64(&c.bufSize, int64(size))
+	} else {
+		atomic.StoreInt64(&c.bufSize, int64(defaultBufferSize))
+	}
+	c.pool = sync.Pool{
+		New: func() any {
+			return bytes.NewBuffer(make([]byte, int(atomic.LoadInt64(&c.bufSize))))
+		},
+	}
+	return c
+}
+
+func (c *copier) Copy(dst io.Writer, src io.Reader) (written int64, err error) {
+	return c.copyBuffer(dst, src, nil)
+}
+
+func (c *copier) CopyBuffer(dst io.Writer, src io.Reader, buf []byte) (written int64, err error) {
+	if buf == nil {
+		return c.Copy(dst, src)
+	}
+	if buf != nil && len(buf) == 0 {
+		panic("empty buffer in CopyBuffer")
+	}
+	b := bytes.NewBuffer(buf)
+	defer b.Reset()
+	return c.copyBuffer(dst, src, b)
+}
+
+func (c *copier) copyBuffer(
+	dst io.Writer, src io.Reader, buf *bytes.Buffer,
+) (written int64, err error) {
+	if dst == nil || src == nil {
+		return 0, errors.New("empty source or destination")
+	}
+	var (
+		wt io.WriterTo
+		rf io.ReaderFrom
+		ok bool
+	)
+	if wt, ok = src.(io.WriterTo); ok {
+		return wt.WriteTo(dst)
+	}
+	if rf, ok = dst.(io.ReaderFrom); ok {
+		return rf.ReadFrom(src)
+	}
+
+	var (
+		limit int64 = math.MaxInt64
+		size        = atomic.LoadInt64(&c.bufSize)
+		l     *io.LimitedReader
+	)
+	if buf == nil {
+		if l, ok = src.(*io.LimitedReader); ok && l.N >= 1 && size > l.N {
+			limit = l.N
+			size = limit
+		}
+		buf, ok = c.pool.Get().(*bytes.Buffer)
+		if !ok || buf == nil {
+			buf = bytes.NewBuffer(make([]byte, size))
+		}
+		defer func() {
+			if atomic.LoadInt64(&c.bufSize) < size {
+				atomic.StoreInt64(&c.bufSize, size)
+				buf.Grow(int(size))
+			}
+			buf.Reset()
+			c.pool.Put(buf)
+		}()
+	}
+	if size > int64(buf.Cap()) {
+		size = int64(buf.Cap())
+	}
+	var nr, nw int
+	for !errors.Is(err, io.EOF) {
+		nr, err = src.Read(buf.Bytes()[:size])
+		if nr > 0 {
+			if int64(nr) > size {
+				size = min(int64(nr), limit)
+			}
+			nw, err = dst.Write(buf.Bytes()[0:nr])
+			if nw < 0 || nr < int(nw) {
+				if err == nil {
+					return written, errors.New("invalid write result")
+				}
+				nw = 0
+			}
+			written += int64(nw)
+			if err != nil {
+				return written, err
+			}
+			if nr != int(nw) {
+				return written, io.ErrShortWrite
+			}
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return written, err
+		}
+	}
+	return written, nil
+}

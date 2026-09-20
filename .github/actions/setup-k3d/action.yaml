@@ -1,0 +1,123 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+name: "Setup k3d environment"
+description: "An action to set up k3d (k3s in Docker)"
+inputs:
+  version:
+    description: "The k3d to use. The default version is `versions/K3D_VERSION`"
+    required: false
+    default: ""
+  k3s_version:
+    description: "The k3s to use. The default version is `versions/K3S_VERSION`"
+    required: false
+    default: ""
+  name:
+    description: "Cluster name"
+    required: false
+    default: "vald"
+  ingress_port:
+    description: 'If it is not "0", ingress will be exposed to the specified port'
+    required: false
+    default: "0"
+  agents:
+    description: "Number of agents"
+    required: false
+    default: "3"
+  options:
+    description: "Options for k3d cluster create command"
+    required: false
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    - name: Detect k3d version
+      id: k3d_version
+      shell: bash
+      run: |
+        if [ -z "${K3D_VERSION}" ]; then
+          if [ -f "versions/K3D_VERSION" ]; then
+            K3D_VERSION=$(cat versions/K3D_VERSION)
+          else
+            K3D_VERSION=latest
+          fi
+        fi
+        echo "tag=v${K3D_VERSION}" >> $GITHUB_OUTPUT
+      env:
+        K3D_VERSION: ${{ inputs.version }}
+    - name: Detect k3s version
+      id: k3s_version
+      shell: bash
+      run: |
+        if [ -z "${K3S_VERSION}" ]; then
+          if [ -f "versions/K3S_VERSION" ]; then
+            K3S_VERSION=$(cat versions/K3S_VERSION)
+          else
+            K3S_VERSION=latest
+          fi
+        fi
+        echo "tag=${K3S_VERSION}" >> $GITHUB_OUTPUT
+      env:
+        K3S_VERSION: ${{ inputs.k3s_version }}
+    - name: Check k3d version
+      id: check_k3d
+      shell: bash
+      run: |
+        INSTALLED_K3D_VERSION=$(k3d version | tee $GITHUB_STEP_SUMMARY | grep k3d | sed 's/^k3d version //')
+        if [ "${INSTALLED_K3D_VERSION}" != ${{ steps.k3d_version.outputs.tag }} ]; then
+          echo "::warning::installed k3d version=${INSTALLED_K3D_VERSION}, detected k3d version=${{ steps.k3d_version.outputs.tag }}"
+        fi
+    - name: Create k8s cluster
+      shell: bash
+      id: start_k3d
+      run: |
+        if [ "${K3D_INGRESS_PORT}" == "0" ]; then
+          if [ -z "${K3D_OPTIONS}" ]; then
+            K3D_OPTIONS="--k3s-arg \"--disable=traefik@server:*\""
+          else
+            K3D_OPTIONS="${K3D_OPTIONS} --k3s-arg \"--disable=traefik@server:*\""
+          fi
+        else
+          if [ -z "${K3D_OPTIONS}" ]; then
+            K3D_OPTIONS="--port ${K3D_INGRESS_PORT}:80@loadbalancer"
+          else
+            K3D_OPTIONS="${K3D_OPTIONS} --port ${K3D_INGRESS_PORT}:80@loadbalancer"
+          fi
+        fi
+        make K3D_CLUSTER_NAME="${{ inputs.name }}" \
+            K3D_NODES="${{ inputs.agents }}" \
+            K3D_INGRESS_PORT="${K3D_INGRESS_PORT}" \
+            K3S_VERSION="${{ steps.k3s_version.outputs.tag }}" \
+            K3D_HOST="host.docker.internal" \
+            K3D_OPTIONS="${K3D_OPTIONS}" \
+            k3d/start
+        k3d cluster list
+      env:
+        K3D_INGRESS_PORT: ${{ inputs.ingress_port }}
+        K3D_OPTIONS: ${{ inputs.options }}
+    - name: Set k3d cluster config to KUBECONFIG
+      shell: bash
+      run: |
+        echo "KUBECONFIG=$(k3d kubeconfig write ${{ inputs.name }})" >> $GITHUB_ENV
+    - name: Check KUBECONFIG environment variable
+      shell: bash
+      run: |
+        echo $KUBECONFIG
+        cat $KUBECONFIG
+        cat /etc/hosts
+    - name: Show Kubernetes Cluster Info
+      shell: bash
+      run: |
+        kubectl cluster-info dump

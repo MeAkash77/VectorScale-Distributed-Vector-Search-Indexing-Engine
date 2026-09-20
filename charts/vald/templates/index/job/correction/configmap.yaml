@@ -1,0 +1,91 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+{{- $corrector := .Values.manager.index.corrector -}}
+{{- $gateway := .Values.gateway.lb -}}
+{{- $index := .Values.manager.index -}}
+{{- $agent := .Values.agent -}}
+{{- $discoverer := .Values.discoverer -}}
+{{- if $corrector.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $corrector.name }}-config
+  labels:
+    app.kubernetes.io/name: {{ include "vald.name" . }}
+    helm.sh/chart: {{ include "vald.chart" . }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/version: {{ .Chart.Version }}
+    app.kubernetes.io/component: {{ $corrector.name }}
+data:
+  config.yaml: |
+    ---
+    version: {{ $corrector.version }}
+    time_zone: {{ default .Values.defaults.time_zone $corrector.time_zone }}
+    logging:
+      {{- $logging := dict "Values" $corrector.logging "default" .Values.defaults.logging }}
+      {{- include "vald.logging" $logging | nindent 6 }}
+    server_config:
+      {{- $servers := dict "Values" $corrector.server_config "default" .Values.defaults.server_config }}
+      {{- include "vald.servers" $servers | nindent 6 }}
+    observability:
+      {{- $observability := dict "Values" $corrector.observability "default" .Values.defaults.observability }}
+      {{- include "vald.observability" $observability | nindent 6 }}
+    corrector:
+      agent_port: {{ default .Values.defaults.server_config.servers.grpc.port $agent.server_config.servers.grpc.port }}
+      agent_name: {{ $agent.name | quote }}
+      agent_dns: {{ $agent.name }}.{{ .Release.Namespace }}.svc.cluster.local
+      agent_namespace: {{ $index.indexer.agent_namespace | quote }}
+      node_name: {{ $index.indexer.node_name | quote }}
+      stream_list_concurrency: {{ $corrector.stream_list_concurrency }}
+      kvs_background_sync_interval:  {{ $corrector.kvs_background_sync_interval }}
+      kvs_background_compaction_interval:  {{ $corrector.kvs_background_compaction_interval }}
+      index_replica: {{ $gateway.gateway_config.index_replica }}
+      gateway:
+        {{- $nextGatewayClient := $corrector.gateway}}
+        {{- if $gateway.enabled -}}
+        {{- $lbServerPort := $gateway.server_config.servers.grpc.port }}
+        {{- $defaultLBHost := printf "%s.%s.svc.cluster.local" $gateway.name .Release.Namespace }}
+        {{- $defaultLBPort := default .Values.defaults.server_config.servers.grpc.port $lbServerPort }}
+        {{- $defaultLBAddr := (list (printf "%s:%d" $defaultLBHost (int64 $defaultLBPort))) }}
+        {{- $lbAddrs := dict "Values" $nextGatewayClient.addrs "default" $defaultLBAddr }}
+        {{- include "vald.grpc.client.addrs" $lbAddrs | nindent 8 }}
+        {{- else -}}
+        {{- $agentServerPort := $agent.server_config.servers.grpc.port }}
+        {{- $defaultAgentHost := printf "%s.%s.svc.cluster.local" $agent.name .Release.Namespace }}
+        {{- $defaultAgentPort := default .Values.defaults.server_config.servers.grpc.port $agentServerPort }}
+        {{- $defaultAgentAddr := (list (printf "%s:%d" $defaultAgentHost (int64 $defaultAgentPort))) }}
+        {{- $agentAddrs := dict "Values" $nextGatewayClient.addrs "default" $defaultAgentAddr }}
+        {{- include "vald.grpc.client.addrs" $agentAddrs | nindent 8 }}
+        {{- end -}}
+        {{- $nextGRPCClient := dict "Values" $nextGatewayClient "default" .Values.defaults.grpc.client }}
+        {{- include "vald.grpc.client" $nextGRPCClient | nindent 8 }}
+      discoverer:
+        duration: {{ $corrector.discoverer.duration }}
+        client:
+          {{- $discovererClient := $corrector.discoverer.client }}
+          {{- $discovererServerPort := $discoverer.server_config.servers.grpc.port }}
+          {{- $defaultDiscovererHost := printf "%s.%s.svc.cluster.local" $discoverer.name .Release.Namespace }}
+          {{- $defaultDiscovererPort := default .Values.defaults.server_config.servers.grpc.port $discovererServerPort }}
+          {{- $defaultDiscovererAddr := (list (printf "%s:%d" $defaultDiscovererHost (int64 $defaultDiscovererPort))) }}
+          {{- $discovererAddrs := dict "Values" $discovererClient.addrs "default" $defaultDiscovererAddr }}
+          {{- include "vald.grpc.client.addrs" $discovererAddrs | nindent 10 }}
+          {{- $discovererGRPCclient := dict "Values" $discovererClient "default" .Values.defaults.grpc.client }}
+          {{- include "vald.grpc.client" $discovererGRPCclient | nindent 10 }}
+        agent_client_options:
+          {{- include "vald.grpc.client.addrs" (dict "Values" $corrector.discoverer.agent_client_options.addrs) | nindent 10 }}
+          {{- include "vald.grpc.client" (dict "Values" $corrector.discoverer.agent_client_options "default" .Values.defaults.grpc.client) | nindent 10 }}
+{{- end }}

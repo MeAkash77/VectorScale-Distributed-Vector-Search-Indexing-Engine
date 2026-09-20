@@ -1,0 +1,816 @@
+// Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package payload.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/wrappers.proto";
+import "google/rpc/status.proto";
+
+option go_package = "github.com/vdaas/vald/apis/grpc/v1/payload";
+option java_multiple_files = true;
+option java_outer_classname = "ValdPayload";
+option java_package = "org.vdaas.vald.api.v1.payload";
+option objc_class_prefix = "Payload";
+
+// Search related messages.
+message Search {
+  // Represent a search request.
+  message Request {
+    // The vector to be searched.
+    repeated float vector = 1 [(buf.validate.field).repeated.min_items = 2];
+    // The configuration of the search request.
+    Config config = 2;
+  }
+
+  // Represent the multiple search request.
+  message MultiRequest {
+    // Represent the multiple search request content.
+    repeated Request requests = 1;
+  }
+
+  // Represent a search by ID request.
+  message IDRequest {
+    // The vector ID to be searched.
+    string id = 1;
+    // The configuration of the search request.
+    Config config = 2;
+  }
+
+  // Represent the multiple search by ID request.
+  message MultiIDRequest {
+    // Represent the multiple search by ID request content.
+    repeated IDRequest requests = 1;
+  }
+
+  // Represent a search by binary object request.
+  message ObjectRequest {
+    // The binary object to be searched.
+    bytes object = 1;
+    // The configuration of the search request.
+    Config config = 2;
+    // Filter configuration.
+    Filter.Target vectorizer = 3;
+  }
+
+  // Represent the multiple search by binary object request.
+  message MultiObjectRequest {
+    // Represent the multiple search by binary object request content.
+    repeated ObjectRequest requests = 1;
+  }
+
+  // Represent search configuration.
+  message Config {
+    // Unique request ID.
+    string request_id = 1;
+    // Maximum number of result to be returned.
+    uint32 num = 2 [(buf.validate.field).uint32.gte = 1];
+    // Search radius.
+    float radius = 3;
+    // Search coefficient.
+    float epsilon = 4;
+    // Search timeout in nanoseconds.
+    int64 timeout = 5;
+    // Ingress filter configurations.
+    Filter.Config ingress_filters = 6;
+    // Egress filter configurations.
+    Filter.Config egress_filters = 7;
+    // Minimum number of result to be returned.
+    uint32 min_num = 8 [(buf.validate.field).uint32.gte = 0];
+    // Aggregation Algorithm
+    AggregationAlgorithm aggregation_algorithm = 9;
+    // Search ratio for agent return result number.
+    google.protobuf.FloatValue ratio = 10;
+    // Search nprobe.
+    uint32 nprobe = 11;
+    // Search edge size
+    int32 edge_size = 12;
+  }
+
+  // AggregationAlgorithm is enum of each aggregation algorithms
+  enum AggregationAlgorithm {
+    Unknown = 0;
+    ConcurrentQueue = 1;
+    SortSlice = 2;
+    SortPoolSlice = 3;
+    PairingHeap = 4;
+  }
+
+  // Represent a search response.
+  message Response {
+    // The unique request ID.
+    string request_id = 1;
+    // Search results.
+    repeated Object.Distance results = 2;
+  }
+
+  // Represent multiple search responses.
+  message Responses {
+    // Represent the multiple search response content.
+    repeated Response responses = 1;
+  }
+
+  // Represent stream search response.
+  message StreamResponse {
+    oneof payload {
+      // Represent the search response.
+      Response response = 1;
+      // The RPC error status.
+      google.rpc.Status status = 2;
+    }
+  }
+}
+
+// Filter related messages.
+message Filter {
+  // Represent the target filter server.
+  message Target {
+    // The target hostname.
+    string host = 1;
+    // The target port.
+    uint32 port = 2;
+  }
+
+  // Represent filter configuration.
+  message Config {
+    // Represent the filter target configuration.
+    repeated Target targets = 1;
+  }
+}
+
+// Insert related messages.
+message Insert {
+  // Represent the insert request.
+  message Request {
+    // The vector to be inserted.
+    Object.Vector vector = 1 [(buf.validate.field).repeated.min_items = 2];
+    // The configuration of the insert request.
+    Config config = 2;
+  }
+
+  // Represent the multiple insert request.
+  message MultiRequest {
+    // Represent multiple insert request content.
+    repeated Request requests = 1;
+  }
+
+  // Represent the insert by binary object request.
+  message ObjectRequest {
+    // The binary object to be inserted.
+    Object.Blob object = 1;
+    // The configuration of the insert request.
+    Config config = 2;
+    // Filter configurations.
+    Filter.Target vectorizer = 3;
+  }
+
+  // Represent the multiple insert by binary object request.
+  message MultiObjectRequest {
+    // Represent multiple insert by object content.
+    repeated ObjectRequest requests = 1;
+  }
+
+  // Represent insert configurations.
+  message Config {
+    // A flag to skip exist check during insert operation.
+    bool skip_strict_exist_check = 1;
+    // Filter configurations.
+    Filter.Config filters = 2;
+    // Insert timestamp.
+    int64 timestamp = 3;
+  }
+}
+
+// Update related messages
+message Update {
+  // Represent the update request.
+  message Request {
+    // The vector to be updated.
+    Object.Vector vector = 1 [(buf.validate.field).repeated.min_items = 2];
+    // The configuration of the update request.
+    Config config = 2;
+  }
+
+  // Represent the multiple update request.
+  message MultiRequest {
+    // Represent the multiple update request content.
+    repeated Request requests = 1;
+  }
+
+  // Represent the update binary object request.
+  message ObjectRequest {
+    // The binary object to be updated.
+    Object.Blob object = 1;
+    // The configuration of the update request.
+    Config config = 2;
+    // Filter target.
+    Filter.Target vectorizer = 3;
+  }
+
+  // Represent the multiple update binary object request.
+  message MultiObjectRequest {
+    // Represent the multiple update object request content.
+    repeated ObjectRequest requests = 1;
+  }
+
+  // Represent a vector meta data.
+  message TimestampRequest {
+    // The vector ID.
+    string id = 1 [(buf.validate.field).string.min_len = 1];
+    // timestamp represents when this vector inserted.
+    int64 timestamp = 2;
+    // force represents forcefully update the timestamp.
+    bool force = 3;
+  }
+
+  // Represent the update configuration.
+  message Config {
+    // A flag to skip exist check during update operation.
+    bool skip_strict_exist_check = 1;
+    // Filter configuration.
+    Filter.Config filters = 2;
+    // Update timestamp.
+    int64 timestamp = 3;
+    // A flag to disable balanced update (split remove -> insert operation)
+    // during update operation.
+    bool disable_balanced_update = 4;
+  }
+}
+
+// Upsert related messages.
+message Upsert {
+  // Represent the upsert request.
+  message Request {
+    // The vector to be upserted.
+    Object.Vector vector = 1 [(buf.validate.field).repeated.min_items = 2];
+    // The configuration of the upsert request.
+    Config config = 2;
+  }
+
+  // Represent mthe ultiple upsert request.
+  message MultiRequest {
+    // Represent the multiple upsert request content.
+    repeated Request requests = 1;
+  }
+
+  // Represent the upsert binary object request.
+  message ObjectRequest {
+    // The binary object to be upserted.
+    Object.Blob object = 1;
+    // The configuration of the upsert request.
+    Config config = 2;
+    // Filter target.
+    Filter.Target vectorizer = 3;
+  }
+
+  // Represent the multiple upsert binary object request.
+  message MultiObjectRequest {
+    // Represent the multiple upsert object request content.
+    repeated ObjectRequest requests = 1;
+  }
+
+  // Represent the upsert configuration.
+  message Config {
+    // A flag to skip exist check during upsert operation.
+    bool skip_strict_exist_check = 1;
+    // Filter configuration.
+    Filter.Config filters = 2;
+    // Upsert timestamp.
+    int64 timestamp = 3;
+    // A flag to disable balanced update (split remove -> insert operation)
+    // during update operation.
+    bool disable_balanced_update = 4;
+  }
+}
+
+// Remove related messages.
+message Remove {
+  // Represent the remove request.
+  message Request {
+    // The object ID to be removed.
+    Object.ID id = 1;
+    // The configuration of the remove request.
+    Config config = 2;
+  }
+
+  // Represent the multiple remove request.
+  message MultiRequest {
+    // Represent the multiple remove request content.
+    repeated Request requests = 1;
+  }
+
+  // Represent the remove request based on timestamp.
+  message TimestampRequest {
+    // The timestamp comparison list. If more than one is specified, the `AND`
+    // search is applied.
+    repeated Timestamp timestamps = 1;
+  }
+
+  // Represent the timestamp comparison.
+  message Timestamp {
+    // Operator is enum of each conditional operator.
+    enum Operator {
+      // The timestamp is equal to the specified value in the request.
+      EQ = 0;
+      // The timestamp is not equal to the specified value in the request.
+      NE = 1;
+      // The timestamp is greater than or equal to the specified value in the
+      // request.
+      GE = 2;
+      // The timestamp is greater than the specified value in the request.
+      GT = 3;
+      // The timestamp is less than or equal to the specified value in the
+      // request.
+      LE = 4;
+      // The timestamp is less than the specified value in the request.
+      LT = 5;
+    }
+    // The timestamp.
+    int64 timestamp = 1;
+    // The conditional operator.
+    Operator operator = 2;
+  }
+
+  // Represent the remove configuration.
+  message Config {
+    // A flag to skip exist check during upsert operation.
+    bool skip_strict_exist_check = 1;
+    // Remove timestamp.
+    int64 timestamp = 3;
+  }
+}
+
+// Flush related messages.
+message Flush {
+  message Request {}
+}
+
+// Common messages.
+message Object {
+  // Represent a request to fetch raw vector.
+  message VectorRequest {
+    // The vector ID to be fetched.
+    ID id = 1 [(buf.validate.field).repeated.min_items = 2];
+    // Filter configurations.
+    Filter.Config filters = 2;
+  }
+
+  // Represent the ID and distance pair.
+  message Distance {
+    // The vector ID.
+    string id = 1;
+    // The distance.
+    float distance = 2;
+  }
+
+  // Represent stream response of distances.
+  message StreamDistance {
+    oneof payload {
+      // The distance.
+      Distance distance = 1;
+      // The RPC error status.
+      google.rpc.Status status = 2;
+    }
+  }
+
+  // Represent the vector ID.
+  message ID {
+    string id = 1 [(buf.validate.field).string.min_len = 1];
+  }
+
+  // Represent multiple vector IDs.
+  message IDs {
+    repeated string ids = 1;
+  }
+
+  // Represent a vector.
+  message Vector {
+    // The vector ID.
+    string id = 1 [(buf.validate.field).string.min_len = 1];
+    // The vector.
+    repeated float vector = 2 [(buf.validate.field).repeated.min_items = 2];
+    // timestamp represents when this vector inserted.
+    int64 timestamp = 3;
+  }
+
+  // Represent a request to fetch vector meta data.
+  message TimestampRequest {
+    // The vector ID to be fetched.
+    ID id = 1 [(buf.validate.field).repeated.min_items = 2];
+  }
+
+  // Represent a vector meta data.
+  message Timestamp {
+    // The vector ID.
+    string id = 1 [(buf.validate.field).string.min_len = 1];
+    // timestamp represents when this vector inserted.
+    int64 timestamp = 2;
+  }
+
+  // Represent multiple vectors.
+  message Vectors {
+    repeated Vector vectors = 1;
+  }
+
+  // Represent stream response of the vector.
+  message StreamVector {
+    oneof payload {
+      // The vector.
+      Vector vector = 1;
+      // The RPC error status.
+      google.rpc.Status status = 2;
+    }
+  }
+
+  // Represent reshape vector.
+  message ReshapeVector {
+    // The binary object.
+    bytes object = 1;
+    // The new shape.
+    repeated int32 shape = 2;
+  }
+
+  // Represent the binary object.
+  message Blob {
+    // The object ID.
+    string id = 1 [(buf.validate.field).string.min_len = 1];
+    // The binary object.
+    bytes object = 2;
+  }
+
+  // Represent stream response of binary objects.
+  message StreamBlob {
+    oneof payload {
+      // The binary object.
+      Blob blob = 1;
+      // The RPC error status.
+      google.rpc.Status status = 2;
+    }
+  }
+
+  // Represent the vector location.
+  message Location {
+    // The name of the location.
+    string name = 1;
+    // The UUID of the vector.
+    string uuid = 2;
+    // The IP list.
+    repeated string ips = 3;
+  }
+
+  // Represent the stream response of the vector location.
+  message StreamLocation {
+    oneof payload {
+      // The vector location.
+      Location location = 1;
+      // The RPC error status.
+      google.rpc.Status status = 2;
+    }
+  }
+
+  // Represent multiple vector locations.
+  message Locations {
+    repeated Location locations = 1;
+  }
+
+  // Represent the list object vector stream request and response.
+  message List {
+    message Request {}
+
+    message Response {
+      oneof payload {
+        // The vector
+        Vector vector = 1;
+        // The RPC error status.
+        google.rpc.Status status = 2;
+      }
+    }
+  }
+}
+
+// Control related messages.
+message Control {
+  // Represent the create index request.
+  message CreateIndexRequest {
+    // The pool size of the create index operation.
+    uint32 pool_size = 1 [(buf.validate.field).uint32.gte = 0];
+  }
+}
+
+// Discoverer related messages.
+message Discoverer {
+  // Represent the dicoverer request.
+  message Request {
+    // The agent name to be discovered.
+    string name = 1 [(buf.validate.field).string.min_len = 1];
+    // The namespace to be discovered.
+    string namespace = 2;
+    // The node to be discovered.
+    string node = 3;
+  }
+}
+
+// Info related messages.
+message Info {
+  // Represent the index information messages.
+  message Index {
+    // Represent the index count message.
+    message Count {
+      // The stored index count.
+      uint32 stored = 1;
+      // The uncommitted index count.
+      uint32 uncommitted = 2;
+      // The indexing index count.
+      bool indexing = 3;
+      // The saving index count.
+      bool saving = 4;
+    }
+    // Represent the index count for each Agents message.
+    message Detail {
+      // count infos for each agents
+      map<string, Count> counts = 1;
+      // index replica of vald cluster
+      uint32 replica = 2;
+      // live agent replica of vald cluster
+      uint32 live_agents = 3;
+    }
+
+    // Represent the UUID message.
+    message UUID {
+      // The committed UUID.
+      message Committed {
+        string uuid = 1;
+      }
+      // The uncommitted UUID.
+      message Uncommitted {
+        string uuid = 1;
+      }
+    }
+
+    // Represents index Statistics
+    message Statistics {
+      bool valid = 1;
+      int32 median_indegree = 2;
+      int32 median_outdegree = 3;
+      uint64 max_number_of_indegree = 4;
+      uint64 max_number_of_outdegree = 5;
+      uint64 min_number_of_indegree = 6;
+      uint64 min_number_of_outdegree = 7;
+      uint64 mode_indegree = 8;
+      uint64 mode_outdegree = 9;
+      uint64 nodes_skipped_for_10_edges = 10;
+      uint64 nodes_skipped_for_indegree_distance = 11;
+      uint64 number_of_edges = 12;
+      uint64 number_of_indexed_objects = 13;
+      uint64 number_of_nodes = 14;
+      uint64 number_of_nodes_without_edges = 15;
+      uint64 number_of_nodes_without_indegree = 16;
+      uint64 number_of_objects = 17;
+      uint64 number_of_removed_objects = 18;
+      uint64 size_of_object_repository = 19;
+      uint64 size_of_refinement_object_repository = 20;
+      double variance_of_indegree = 21;
+      double variance_of_outdegree = 22;
+      double mean_edge_length = 23;
+      double mean_edge_length_for_10_edges = 24;
+      double mean_indegree_distance_for_10_edges = 25;
+      double mean_number_of_edges_per_node = 26;
+      double c1_indegree = 27;
+      double c5_indegree = 28;
+      double c95_outdegree = 29;
+      double c99_outdegree = 30;
+      repeated int64 indegree_count = 31;
+      repeated uint64 outdegree_histogram = 32;
+      repeated uint64 indegree_histogram = 33;
+    }
+
+    // Represents index Statistics for each Agents
+    message StatisticsDetail {
+      // count infos for each agents
+      map<string, Statistics> details = 1;
+    }
+
+    // Represents index Property
+    message Property {
+      int32 dimension = 1;
+      int32 thread_pool_size = 2;
+      string object_type = 3;
+      string distance_type = 4;
+      string index_type = 5;
+      string database_type = 6;
+      string object_alignment = 7;
+      int32 path_adjustment_interval = 8;
+      int32 graph_shared_memory_size = 9;
+      int32 tree_shared_memory_size = 10;
+      int32 object_shared_memory_size = 11;
+      int32 prefetch_offset = 12;
+      int32 prefetch_size = 13;
+      string accuracy_table = 14;
+      string search_type = 15;
+      float max_magnitude = 16;
+      int32 n_of_neighbors_for_insertion_order = 17;
+      float epsilon_for_insertion_order = 18;
+      string refinement_object_type = 19;
+      int32 truncation_threshold = 20;
+      int32 edge_size_for_creation = 21;
+      int32 edge_size_for_search = 22;
+      int32 edge_size_limit_for_creation = 23;
+      double insertion_radius_coefficient = 24;
+      int32 seed_size = 25;
+      string seed_type = 26;
+      int32 truncation_thread_pool_size = 27;
+      int32 batch_size_for_creation = 28;
+      string graph_type = 29;
+      int32 dynamic_edge_size_base = 30;
+      int32 dynamic_edge_size_rate = 31;
+      float build_time_limit = 32;
+      int32 outgoing_edge = 33;
+      int32 incoming_edge = 34;
+      float epsilon_for_creation = 35;
+    }
+
+    // Represents index Properties for each Agents
+    message PropertyDetail {
+      map<string, Property> details = 1;
+    }
+  }
+
+  // Represent the resource stats
+  message ResourceStats {
+    string name = 1;
+    string ip = 2 [(buf.validate.field).string.ipv4 = true];
+    // Container resource usage statistics
+    CgroupStats cgroup_stats = 3;
+  }
+
+  message CgroupStats {
+    // CPU cores available
+    double cpu_limit_cores = 1;
+    // CPU usage in cores (not percentage)
+    double cpu_usage_cores = 2;
+    // Memory limit in bytes
+    uint64 memory_limit_bytes = 3;
+    // Memory usage in bytes
+    uint64 memory_usage_bytes = 4;
+  }
+
+  // Represent the pod information message.
+  message Pod {
+    // The app name of the pod on the label.
+    string app_name = 1;
+    // The name of the pod.
+    string name = 2;
+    // The namespace of the pod.
+    string namespace = 3;
+    // The IP of the pod.
+    string ip = 4 [(buf.validate.field).string.ipv4 = true];
+    // The CPU information of the pod.
+    CPU cpu = 5;
+    // The memory information of the pod.
+    Memory memory = 6;
+    // The node information of the pod.
+    Node node = 7;
+  }
+
+  // Represent the node information message.
+  message Node {
+    // The name of the node.
+    string name = 1;
+    // The internal IP address of the node.
+    string internal_addr = 2;
+    // The external IP address of the node.
+    string external_addr = 3;
+    // The CPU information of the node.
+    CPU cpu = 4;
+    // The memory information of the node.
+    Memory memory = 5;
+    // The pod information of the node.
+    Pods Pods = 6;
+  }
+
+  // Represent the service information message.
+  message Service {
+    // The name of the svc.
+    string name = 1;
+    // The cluster ip of the svc.
+    string cluster_ip = 2;
+    // The cluster ips of the svc.
+    repeated string cluster_ips = 3;
+    // The port of the svc.
+    repeated ServicePort ports = 4;
+    // The labels of the service.
+    Labels labels = 5;
+    // The annotations of the service.
+    Annotations annotations = 6;
+  }
+
+  // Represets the service port information message.
+  message ServicePort {
+    // The name of the port.
+    string name = 1;
+    // The port number
+    int32 port = 2;
+  }
+
+  // Represent the kubernetes labels.
+  message Labels {
+    map<string, string> labels = 1;
+  }
+
+  // Represent the kubernetes annotations.
+  message Annotations {
+    map<string, string> annotations = 1;
+  }
+
+  // Represent the CPU information message.
+  message CPU {
+    // The CPU resource limit.
+    double limit = 1;
+    // The CPU resource requested.
+    double request = 2;
+    // The CPU usage.
+    double usage = 3;
+  }
+
+  // Represent the memory information message.
+  message Memory {
+    // The memory limit.
+    double limit = 1;
+    // The memory requested.
+    double request = 2;
+    // The memory usage.
+    double usage = 3;
+  }
+
+  // Represent the multiple pod information message.
+  message Pods {
+    // The multiple pod information.
+    repeated Pod pods = 1 [(buf.validate.field).repeated.min_items = 1];
+  }
+
+  // Represent the multiple node information message.
+  message Nodes {
+    // The multiple node information.
+    repeated Node nodes = 1 [(buf.validate.field).repeated.min_items = 1];
+  }
+
+  // Represent the multiple service information message.
+  message Services {
+    // The multiple service information.
+    repeated Service services = 1 [(buf.validate.field).repeated.min_items = 1];
+  }
+
+  // Represent the multiple IP message.
+  message IPs {
+    repeated string ip = 1;
+  }
+}
+
+// Mirror related messages.
+message Mirror {
+  // Represent server information.
+  message Target {
+    // The target hostname.
+    string host = 1;
+    // The target port.
+    uint32 port = 2;
+  }
+
+  // Represent the multiple Target message.
+  message Targets {
+    // The multiple target information.
+    repeated Target targets = 1;
+  }
+}
+
+message Meta {
+  message Key {
+    string key = 1;
+  }
+
+  message Value {
+    google.protobuf.Any value = 1;
+  }
+
+  message KeyValue {
+    Key key = 1;
+    Value value = 2;
+  }
+}
+
+// Represent an empty message.
+message Empty {}

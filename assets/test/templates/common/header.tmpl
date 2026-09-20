@@ -1,0 +1,11 @@
+{{define "header"}}
+{{range .Comments}}{{.}}
+{{end -}}
+package {{.Package}}
+
+import (
+    "github.com/vdaas/vald/internal/test/goleak"
+{{range .Imports}}{{.Name}} {{.Path}}
+{{end}}
+)
+{{end}}

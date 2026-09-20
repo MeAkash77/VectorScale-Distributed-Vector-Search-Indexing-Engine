@@ -1,0 +1,90 @@
+// Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+package grpc
+
+import (
+	"context"
+	"sync/atomic"
+
+	"github.com/vdaas/vald/apis/grpc/v1/payload"
+	"github.com/vdaas/vald/apis/grpc/v1/vald"
+	"github.com/vdaas/vald/internal/errors"
+	"github.com/vdaas/vald/internal/info"
+	"github.com/vdaas/vald/internal/log"
+	"github.com/vdaas/vald/internal/net/grpc/errdetails"
+	"github.com/vdaas/vald/internal/net/grpc/errhandler"
+	"github.com/vdaas/vald/internal/net/grpc/status"
+	"github.com/vdaas/vald/internal/observability/attribute"
+	"github.com/vdaas/vald/internal/observability/trace"
+)
+
+// Flush removes all vectors that are indexed and uncommitted in the `vald-agent`.
+func (s *server) Flush(
+	ctx context.Context, req *payload.Flush_Request,
+) (*payload.Info_Index_Count, error) {
+	_, span := trace.StartSpan(ctx, apiName+"/"+vald.FlushRPCName)
+	defer trace.End(span)
+	err := s.ngt.RegenerateIndexes(ctx)
+	if err != nil {
+		var attrs []attribute.KeyValue
+		if errors.Is(err, errors.ErrFlushingIsInProgress) {
+			err = status.WrapWithAborted("Flush API aborted due to flushing indices is in progress", err,
+				&errdetails.RequestInfo{
+					ServingData: errdetails.Serialize(req),
+				},
+				s.resourceInfo(ngtResourceType+"/ngt.Flush"))
+			log.Debug(err)
+			attrs = trace.StatusCodeAborted(err.Error())
+		} else if errors.Is(err, errors.ErrWriteOperationToReadReplica) {
+			err = status.WrapWithAborted("Flush API aborted due to agent is read only", err,
+				&errdetails.RequestInfo{
+					ServingData: errdetails.Serialize(req),
+				},
+				s.resourceInfo(ngtResourceType+"/ngt.Flush"))
+			log.Debug(err)
+			attrs = trace.StatusCodeAborted(err.Error())
+
+		} else {
+			err = status.WrapWithInternal("Flush API failed", err,
+				&errdetails.RequestInfo{
+					ServingData: errdetails.Serialize(req),
+				},
+				s.resourceInfo(ngtResourceType+"/ngt.Flush"), info.Get())
+			log.Error(err)
+			attrs = trace.StatusCodeInternal(err.Error())
+		}
+		errhandler.RecordSpanAttrs(span, attrs, err)
+		return nil, err
+	}
+
+	var (
+		stored      uint32
+		uncommitted uint32
+		indexing    atomic.Value
+		saving      atomic.Value
+	)
+	stored = 0
+	uncommitted = 0
+	indexing.Store(false)
+	saving.Store(false)
+
+	cnts := &payload.Info_Index_Count{
+		Stored:      atomic.LoadUint32(&stored),
+		Uncommitted: atomic.LoadUint32(&uncommitted),
+		Indexing:    indexing.Load().(bool),
+		Saving:      saving.Load().(bool),
+	}
+
+	return cnts, nil
+}

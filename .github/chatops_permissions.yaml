@@ -1,0 +1,98 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+roles:
+  admin:
+    policies:
+      - rebase
+      - approve
+      - add-contributors
+      - gen-test
+      - label
+      - format
+      - changelog
+  author:
+    policies:
+      - rebase
+      - approve
+      - add-contributors
+      - gen-test
+      - label
+      - format
+      - changelog
+  sig-lead:
+    policies:
+      - rebase
+      - approve
+      - gen-test
+      - label
+      - format
+      - changelog
+  sig-sre:
+    policies:
+      - rebase
+      - add-contributors
+      - gen-test
+      - label
+      - format
+  sig-set:
+    policies:
+      - rebase
+      - gen-test
+      - label
+      - format
+  sig-core:
+    policies:
+      - rebase
+      - gen-test
+      - label
+      - format
+  contributor:
+    policies:
+      - rebase
+      - label
+      - format
+default-roles:
+  - contributor
+users:
+  kpango:
+    role:
+      - author
+      - admin
+  kmrmt:
+    role:
+      - author
+      - sig-core
+  vankichi:
+    role:
+      - sig-lead
+      - contributor
+      - sig-set
+      - author
+  datelier:
+    role:
+      - contributor
+      - sig-core
+      - author
+  Matts966:
+    role:
+      - contributor
+      - author
+  takuyaymd:
+    role:
+      - contributor
+  tayaboo:
+    role:
+      - contributor

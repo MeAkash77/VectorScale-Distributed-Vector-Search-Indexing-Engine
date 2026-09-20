@@ -1,0 +1,5 @@
+- :ok_woman: `/approve` - approve
+- :bento: `/format` - format codes and add licenses
+- :white_check_mark: `/gen-test` - generate test codes
+- :label: `/label` - add labels
+- :end: :two: :end: `/label actions/e2e-v2` - run E2E deploy & integration test (tests/v2/e2e)

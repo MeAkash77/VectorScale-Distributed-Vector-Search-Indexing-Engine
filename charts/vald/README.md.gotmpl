@@ -1,0 +1,52 @@
+Vald
+===
+
+This is a Helm chart to install Vald components.
+
+Current chart version is `{{ template "chart.version" . }}`
+
+Table of Contents
+---
+
+- [Install](#install)
+- [Configuration](#configuration)
+    - [Overview](#overview)
+    - [Parameters](#parameters)
+
+Install
+---
+
+Add Vald Helm repository
+
+    $ helm repo add vald https://vald.vdaas.org/charts
+
+Run the following command to install the chart,
+
+    $ helm install vald-cluster vald/vald
+
+
+Configuration
+---
+
+### Overview
+
+`values.yaml` is composed of the following sections:
+
+- `defaults`
+    - default configurations of common parts
+    - be overridden by the fields in each components' configurations
+- `gateway`
+    - configurations of gateways
+        - `filter`
+        - `lb`
+- `agent`
+    - configurations of vald-agent
+- `discoverer`
+    - configurations of vald-discoverer
+- `manager`
+    - configurations of manager components
+        - `index`
+
+### Parameters
+
+{{ template "chart.valuesTable" . }}

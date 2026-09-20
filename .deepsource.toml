@@ -1,0 +1,83 @@
+#
+# Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+version = 1
+
+exclude_patterns = [
+  "apis/**/*.pb.go",
+  "example/**"
+]
+
+test_patterns = [
+  "*_test.go"
+]
+
+[[analyzers]]
+name = "go"
+enabled = true
+
+  [analyzers.meta]
+  import_root = "github.com/vdaas/vald"
+  dependencies_vendored = false
+  cgo_enabled = false
+
+[[analyzers]]
+name = "secrets"
+enabled = true
+
+[[analyzers]]
+name = "shell"
+enabled = true
+
+[[analyzers]]
+name = "docker"
+enabled = true
+
+  [analyzers.meta]
+  dockerfile_paths = [
+    "dockers/agent/core/agent/Dockerfile",
+    "dockers/agent/core/faiss/Dockerfile",
+    "dockers/agent/core/ngt/Dockerfile",
+    "dockers/agent/sidecar/Dockerfile",
+    "dockers/buildbase/Dockerfile",
+    "dockers/ci/base/Dockerfile",
+    "dockers/dev/Dockerfile",
+    "dockers/discoverer/k8s/Dockerfile",
+    "dockers/gateway/filter/Dockerfile",
+    "dockers/gateway/lb/Dockerfile",
+    "dockers/gateway/mirror/Dockerfile",
+    "dockers/index/job/correction/Dockerfile",
+    "dockers/index/job/creation/Dockerfile",
+    "dockers/index/job/readreplica/rotate/Dockerfile",
+    "dockers/index/job/save/Dockerfile",
+    "dockers/index/operator/Dockerfile",
+    "dockers/manager/index/Dockerfile",
+    "dockers/operator/helm/Dockerfile",
+    "dockers/readreplica/job/readreplica/rotate/Dockerfile",
+    "dockers/tools/benchmark/job/Dockerfile",
+    "dockers/operator/benchmark/Dockerfile",
+    "dockers/tools/cli/loadtest/Dockerfile"
+  ]
+
+  trusted_registries = [
+    "docker.io",
+    "gcr.io/distroless",
+    "ghcr.io/vdaas/vald",
+    "hub.docker.com"
+  ]
+
+[[analyzers]]
+name = "test-coverage"
+enabled = false

@@ -1,0 +1,699 @@
+// Copyright (C) 2019-2026 vdaas.org vald team <vald@vdaas.org>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+package server
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/vdaas/vald/internal/errors"
+	"github.com/vdaas/vald/internal/log"
+	"github.com/vdaas/vald/internal/log/logger"
+	"github.com/vdaas/vald/internal/net"
+	"github.com/vdaas/vald/internal/net/grpc"
+	"github.com/vdaas/vald/internal/sync/errgroup"
+	"github.com/vdaas/vald/internal/tls"
+	"golang.org/x/net/http2"
+)
+
+func TestServerMode_String(t *testing.T) {
+	type test struct {
+		name string
+		want string
+		m    ServerMode
+	}
+
+	tests := []test{
+		{
+			name: "returns REST when in REST mode",
+			m:    1,
+			want: "REST",
+		},
+
+		{
+			name: "returns gRPC when in gRPC mode",
+			m:    2,
+			want: "gRPC",
+		},
+
+		{
+			name: "returns GraphQL when in GraphQL mode",
+			m:    3,
+			want: "GraphQL",
+		},
+
+		{
+			name: "returns unknown when in unknown mode",
+			m:    5,
+			want: "unknown",
+		},
+	}
+
+	for _, tc := range tests {
+		test := tc
+		t.Run(test.name, func(_ *testing.T) {
+			got := test.m.String()
+			if test.want != got {
+				t.Errorf("String is wrong. want: %v, got: %v", test.want, got)
+			}
+		})
+	}
+}
+
+func TestMode(t *testing.T) {
+	type test struct {
+		name string
+		str  string
+		want ServerMode
+	}
+
+	tests := []test{
+		{
+			name: "returns REST when in REST mode (rest)",
+			str:  "REST",
+			want: REST,
+		},
+
+		{
+			name: "returns HTTP when in REST mode (http)",
+			str:  "HTTP",
+			want: REST,
+		},
+
+		{
+			name: "returns GRPC when in gRPC mode",
+			str:  "GRPC",
+			want: GRPC,
+		},
+
+		{
+			name: "returns GraphQL when in GraphQL mode (graphql)",
+			str:  "GraphQL",
+			want: GQL,
+		},
+
+		{
+			name: "returns GQL when in GraphQL mode (gql)",
+			str:  "GQL",
+			want: GQL,
+		},
+
+		{
+			name: "returns 0 when in unknown mode",
+			str:  "Vald",
+			want: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Mode(tt.str)
+			if tt.want != got {
+				t.Errorf("Mode is wrong. want: %v, got: %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestNew(t *testing.T) {
+	type test struct {
+		wantErr   error
+		checkFunc func(got *server, gotErr, wantErr error) error
+		name      string
+		opts      []Option
+	}
+
+	tests := []test{
+		func() test {
+			type handler struct {
+				http.Handler
+			}
+
+			hdr := new(handler)
+
+			return test{
+				name: "returns REST server instance when in REST mode",
+				opts: []Option{
+					WithHTTPHandler(hdr),
+					WithErrorGroup(nil),
+					WithReadHeaderTimeout("1s"),
+					WithReadTimeout("2s"),
+					WithWriteTimeout("3s"),
+					WithIdleTimeout("4s"),
+					WithTLSConfig(new(tls.Config)),
+				},
+				checkFunc: func(got *server, gotErr, wantErr error) error {
+					if got.http.srv == nil {
+						return errors.New("http srv is nil")
+					}
+
+					if !errors.Is(gotErr, wantErr) {
+						return errors.Errorf("err is not equals. want: %v, got: %v", wantErr, gotErr)
+					}
+
+					return nil
+				},
+				wantErr: nil,
+			}
+		}(),
+
+		func() test {
+			return test{
+				name: "returns nil and error when REST server returns invalid api config error",
+				opts: []Option{},
+				checkFunc: func(got *server, gotErr, wantErr error) error {
+					if got != nil {
+						return errors.Errorf("New return not nil: %v", got)
+					}
+
+					if !errors.Is(gotErr, wantErr) {
+						return errors.Errorf("err is not equals. want: %v, got: %v", wantErr, gotErr)
+					}
+
+					return nil
+				},
+				wantErr: errors.ErrInvalidAPIConfig,
+			}
+		}(),
+
+		func() test {
+			fn := func(_ *grpc.Server) {}
+
+			return test{
+				name: "returns gRPC server instance when in gRPC mode",
+				opts: []Option{
+					WithServerMode(GRPC),
+					WithGRPCRegisterar(fn),
+					WithGRPCKeepaliveTime("1s"),
+					WithGRPCOption([]grpc.ServerOption{}...),
+					WithTLSConfig(new(tls.Config)),
+				},
+				checkFunc: func(got *server, gotErr, wantErr error) error {
+					if got.grpc.srv == nil {
+						return errors.New("grpc srv is nil")
+					}
+
+					if !errors.Is(gotErr, wantErr) {
+						return errors.Errorf("err is not equals. want: %v, got: %v", wantErr, gotErr)
+					}
+
+					return nil
+				},
+				wantErr: nil,
+			}
+		}(),
+
+		func() test {
+			return test{
+				name: "returns nil and error when gRPC server returns invalid api config error",
+				opts: []Option{
+					WithServerMode(GRPC),
+				},
+				checkFunc: func(got *server, gotErr, wantErr error) error {
+					if got != nil {
+						return errors.Errorf("New return not nil: %v", got)
+					}
+
+					if !errors.Is(gotErr, wantErr) {
+						return errors.Errorf("err is not equals. want: %v, got: %v", wantErr, gotErr)
+					}
+
+					return nil
+				},
+				wantErr: errors.ErrInvalidAPIConfig,
+			}
+		}(),
+
+		func() test {
+			type handler struct {
+				http.Handler
+			}
+
+			hdr := new(handler)
+
+			return test{
+				name: "returns GQL server instance when in GraphQL mode",
+				opts: []Option{
+					WithServerMode(GQL),
+					WithHTTPHandler(hdr),
+					WithErrorGroup(nil),
+					WithReadHeaderTimeout("1s"),
+					WithReadTimeout("2s"),
+					WithWriteTimeout("3s"),
+					WithIdleTimeout("4s"),
+					WithTLSConfig(new(tls.Config)),
+				},
+				checkFunc: func(got *server, gotErr, wantErr error) error {
+					if got.http.srv == nil {
+						return errors.New("http srv is nil")
+					}
+
+					if !errors.Is(gotErr, wantErr) {
+						return errors.Errorf("err is not equals. want: %v, got: %v", wantErr, gotErr)
+					}
+
+					return nil
+				},
+				wantErr: nil,
+			}
+		}(),
+
+		func() test {
+			return test{
+				name: "returns nil and error when GQL server returns invalid api config error",
+				opts: []Option{
+					WithServerMode(GQL),
+				},
+				checkFunc: func(got *server, gotErr, wantErr error) error {
+					if got != nil {
+						return errors.Errorf("New return not nil: %v", got)
+					}
+
+					if !errors.Is(gotErr, wantErr) {
+						return errors.Errorf("err is not equals. want: %v, got: %v", wantErr, gotErr)
+					}
+
+					return nil
+				},
+				wantErr: errors.ErrInvalidAPIConfig,
+			}
+		}(),
+	}
+
+	log.Init(log.WithLoggerType(logger.NOP.String()))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := New(tt.opts...)
+
+			if tt.wantErr == nil {
+				if err := tt.checkFunc(s.(*server), err, tt.wantErr); err != nil {
+					t.Error(err)
+				}
+			}
+		})
+	}
+}
+
+func Test_server_IsRunning(t *testing.T) {
+	type test struct {
+		s    *server
+		name string
+		want bool
+	}
+
+	tests := []test{
+		{
+			name: "returns true when server is running",
+			s: &server{
+				running: true,
+			},
+			want: true,
+		},
+
+		{
+			name: "returns false when server is not running",
+			s: &server{
+				running: false,
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.s.IsRunning()
+			if tt.want != got {
+				t.Errorf("IsRunning is wrong. want: %v, got: %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func Test_server_Name(t *testing.T) {
+	type test struct {
+		name string
+		s    *server
+		want string
+	}
+
+	tests := []test{
+		{
+			name: "returns name of server instance field",
+			s: &server{
+				name: "name",
+			},
+			want: "name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.s.Name()
+			if tt.want != got {
+				t.Errorf("Name is wrong. want: %v, got: %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func Test_server_ListenAndServe(t *testing.T) {
+	type args struct {
+		ctx   context.Context
+		errCh chan error
+	}
+
+	type field struct {
+		eg             errgroup.Group
+		httpSrvStarter func(net.Listener) error
+		grpcSrv        *grpc.Server
+		lc             *net.ListenConfig
+		preStartFunc   func() error
+		host           string
+		pwt            time.Duration
+		sddur          time.Duration
+		port           uint
+		running        bool
+		mode           ServerMode
+	}
+
+	type test struct {
+		args      args
+		want      error
+		afterFunc func(*testing.T)
+		name      string
+		field     field
+	}
+
+	tests := []test{
+		func() test {
+			return test{
+				name: "returns nil when server is already running",
+				field: field{
+					running: true,
+				},
+				want: nil,
+			}
+		}(),
+		func() test {
+			err := errors.New("faild to prestart")
+
+			return test{
+				name: "returns error when prestart function return error",
+				field: field{
+					running: false,
+					preStartFunc: func() error {
+						return err
+					},
+				},
+				want: err,
+			}
+		}(),
+		func() test {
+			ctx, cancel := context.WithCancel(t.Context())
+			eg, ctx := errgroup.New(ctx)
+
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+
+			srv := &http.Server{
+				Handler:           handler,
+				ReadHeaderTimeout: 3 * time.Second,
+			}
+
+			return test{
+				name: "returns nil when serving of REST server is successes",
+				field: field{
+					mode:           REST,
+					eg:             eg,
+					httpSrvStarter: srv.Serve,
+					host:           "vald",
+					port:           8081,
+					lc:             &net.ListenConfig{},
+					preStartFunc: func() error {
+						return nil
+					},
+					running: false,
+				},
+				afterFunc: func(t *testing.T) {
+					t.Helper()
+					srv.Shutdown(ctx)
+					cancel()
+					eg.Wait()
+				},
+				want: nil,
+			}
+		}(),
+		func() test {
+			ctx, cancel := context.WithCancel(t.Context())
+			eg, _ := errgroup.New(ctx)
+
+			srv := new(grpc.Server)
+
+			return test{
+				name: "returns nil when serving of gRPC server is successes",
+				field: field{
+					mode:           GRPC,
+					eg:             eg,
+					httpSrvStarter: srv.Serve,
+					grpcSrv:        srv,
+					host:           "vald",
+					port:           8082,
+					lc:             &net.ListenConfig{},
+					preStartFunc: func() error {
+						return nil
+					},
+					running: false,
+				},
+				afterFunc: func(t *testing.T) {
+					t.Helper()
+					cancel()
+					eg.Wait()
+				},
+				want: nil,
+			}
+		}(),
+	}
+
+	log.Init(log.WithLoggerType(logger.NOP.String()))
+	for _, tc := range tests {
+		test := tc
+		t.Run(test.name, func(tt *testing.T) {
+			defer func() {
+				if test.afterFunc != nil {
+					defer test.afterFunc(tt)
+				}
+			}()
+
+			s := &server{
+				mode: test.field.mode,
+				eg:   test.field.eg,
+				http: struct {
+					h        http.Handler
+					srv      *http.Server
+					h2srv    *http2.Server
+					enableH2 bool
+					starter  func(net.Listener) error
+				}{
+					starter: test.field.httpSrvStarter,
+				},
+				grpc: struct {
+					srv        *grpc.Server
+					keepAlive  *grpcKeepalive
+					maxMsgSize int
+					opts       []grpc.ServerOption
+					regs       []func(*grpc.Server)
+				}{
+					srv: test.field.grpcSrv,
+				},
+				lc:           test.field.lc,
+				pwt:          test.field.pwt,
+				sddur:        test.field.sddur,
+				running:      test.field.running,
+				preStartFunc: test.field.preStartFunc,
+			}
+
+			got := s.ListenAndServe(test.args.ctx, test.args.errCh)
+			if !errors.Is(got, test.want) {
+				t.Errorf("ListenAndServe returns error: %v", got)
+			}
+		})
+	}
+}
+
+func Test_server_Shutdown(t *testing.T) {
+	type args struct {
+		ctx context.Context
+	}
+
+	type field struct {
+		eg          errgroup.Group
+		httpSrv     *http.Server
+		grpcSrv     *grpc.Server
+		preStopFunc func() error
+		pwt         time.Duration
+		sddur       time.Duration
+		running     bool
+		mode        ServerMode
+	}
+
+	type test struct {
+		args      args
+		want      error
+		afterFunc func(*testing.T)
+		checkFunc func(s *server, got, want error) error
+		name      string
+		field     field
+	}
+
+	defaultCheckFunc := func(s *server, got, want error) error {
+		if !errors.Is(want, got) {
+			return errors.Errorf("Shutdown returns error: %v", got)
+		}
+		var running bool
+		s.mu.RLock()
+		running = s.running
+		s.mu.RUnlock()
+
+		if running {
+			return errors.New("server is running")
+		}
+		return nil
+	}
+
+	tests := []test{
+		func() test {
+			return test{
+				name: "returns nil when server is not running",
+				want: nil,
+			}
+		}(),
+		func() test {
+			ctx, cancel := context.WithCancel(t.Context())
+			eg, ctx := errgroup.New(ctx)
+
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+			testSrv := httptest.NewServer(handler)
+
+			return test{
+				name: "returns nil when shutdown of REST server is successes",
+				args: args{
+					ctx: ctx,
+				},
+				field: field{
+					mode:    REST,
+					eg:      eg,
+					pwt:     10 * time.Millisecond,
+					sddur:   1 * time.Second,
+					running: true,
+					httpSrv: testSrv.Config,
+					preStopFunc: func() error {
+						return nil
+					},
+				},
+				afterFunc: func(t *testing.T) {
+					t.Helper()
+					testSrv.Close()
+					cancel()
+					eg.Wait()
+				},
+				want: nil,
+			}
+		}(),
+		func() test {
+			ctx, cancel := context.WithCancel(t.Context())
+			eg, ctx := errgroup.New(ctx)
+
+			grpcSrv := grpc.NewServer()
+
+			return test{
+				name: "returns nil when shutdown of gRPC server is successes",
+				args: args{
+					ctx: ctx,
+				},
+				field: field{
+					mode:    GRPC,
+					eg:      eg,
+					pwt:     10 * time.Millisecond,
+					sddur:   1 * time.Second,
+					running: true,
+					grpcSrv: grpcSrv,
+					preStopFunc: func() error {
+						return nil
+					},
+				},
+				afterFunc: func(t *testing.T) {
+					t.Helper()
+					cancel()
+					eg.Wait()
+				},
+				want: nil,
+			}
+		}(),
+	}
+
+	log.Init(log.WithLoggerType(logger.NOP.String()))
+	for _, tc := range tests {
+		test := tc
+		t.Run(test.name, func(tt *testing.T) {
+			defer func() {
+				if test.afterFunc != nil {
+					defer test.afterFunc(tt)
+				}
+			}()
+			if test.checkFunc == nil {
+				test.checkFunc = defaultCheckFunc
+			}
+
+			s := &server{
+				mode: test.field.mode,
+				eg:   test.field.eg,
+				http: struct {
+					h        http.Handler
+					srv      *http.Server
+					h2srv    *http2.Server
+					enableH2 bool
+					starter  func(net.Listener) error
+				}{
+					srv: test.field.httpSrv,
+				},
+				grpc: struct {
+					srv        *grpc.Server
+					keepAlive  *grpcKeepalive
+					maxMsgSize int
+					opts       []grpc.ServerOption
+					regs       []func(*grpc.Server)
+				}{
+					srv: test.field.grpcSrv,
+				},
+				pwt:         test.field.pwt,
+				sddur:       test.field.sddur,
+				running:     test.field.running,
+				preStopFunc: test.field.preStopFunc,
+			}
+
+			got := s.Shutdown(test.args.ctx)
+			if err := test.checkFunc(s, got, test.want); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+}
+
+// NOT IMPLEMENTED BELOW
