@@ -18,6 +18,101 @@
 [![Slack](https://img.shields.io/badge/slack-join-brightgreen?logo=slack&style=flat-square)](https://join.slack.com/t/vald-community/shared_invite/zt-db2ky9o4-R_9p2sVp8xRwztVa8gfnPA)
 [![Twitter](https://img.shields.io/badge/twitter-follow-blue?logo=twitter&style=flat-square)](https://twitter.com/vdaas_vald)
 
+
+# 🧰 Technology Stack
+
+<div align="center">
+
+### Core Engineering
+
+<a href="https://go.dev/">
+  <img src="https://skillicons.dev/icons?i=go" width="55" alt="Go"/>
+</a>
+&nbsp;&nbsp;
+<a href="https://grpc.io/">
+  <img src="https://grpc.io/img/logos/grpc-icon-color.png" width="55" alt="gRPC"/>
+</a>
+&nbsp;&nbsp;
+<a href="https://protobuf.dev/">
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/google/google-original.svg" width="55" alt="Protocol Buffers"/>
+</a>
+
+<br>
+
+<sub>
+<strong>Go</strong> · <strong>gRPC</strong> · <strong>Protocol Buffers</strong>
+</sub>
+
+<br><br>
+
+### Search & Distributed Systems
+
+<a href="https://github.com/yahoojapan/NGT">
+  <img src="https://skillicons.dev/icons?i=cpp" width="55" alt="NGT / Native Search"/>
+</a>
+&nbsp;&nbsp;
+<a href="https://kubernetes.io/">
+  <img src="https://skillicons.dev/icons?i=kubernetes" width="55" alt="Kubernetes"/>
+</a>
+&nbsp;&nbsp;
+<a href="https://www.docker.com/">
+  <img src="https://skillicons.dev/icons?i=docker" width="55" alt="Docker"/>
+</a>
+&nbsp;&nbsp;
+<a href="https://aws.amazon.com/eks/">
+  <img src="https://skillicons.dev/icons?i=aws" width="55" alt="AWS"/>
+</a>
+
+<br>
+
+<sub>
+<strong>ANN / NGT</strong> · <strong>Kubernetes</strong> · <strong>Docker</strong> · <strong>AWS / EKS</strong>
+</sub>
+
+<br><br>
+
+### Observability
+
+<a href="https://opentelemetry.io/">
+  <img src="https://skillicons.dev/icons?i=opentelemetry" width="55" alt="OpenTelemetry"/>
+</a>
+&nbsp;&nbsp;
+<a href="https://prometheus.io/">
+  <img src="https://skillicons.dev/icons?i=prometheus" width="55" alt="Prometheus"/>
+</a>
+&nbsp;&nbsp;
+<a href="https://grafana.com/">
+  <img src="https://skillicons.dev/icons?i=grafana" width="55" alt="Grafana"/>
+</a>
+
+<br>
+
+<sub>
+<strong>OpenTelemetry</strong> · <strong>Prometheus</strong> · <strong>Grafana</strong>
+</sub>
+
+</div>
+
+---
+
+### Architecture Stack
+
+| Layer                        | Technologies                                             |
+| ---------------------------- | -------------------------------------------------------- |
+| **Language**                 | 🟦 Go                                                    |
+| **RPC / Networking**         | gRPC, Protocol Buffers                                   |
+| **Vector Search**            | NGT, ANN Search                                          |
+| **Distributed Architecture** | Gateway, Vector Agents, Query Fan-out, Top-K Aggregation |
+| **Indexing**                 | Distributed Vector Indexes, Index Persistence            |
+| **Containerization**         | Docker                                                   |
+| **Orchestration**            | Kubernetes                                               |
+| **Cloud**                    | AWS, Amazon EKS                                          |
+| **Observability**            | OpenTelemetry, Prometheus, Grafana                       |
+| **Reliability**              | Replication, Backup, Recovery, Rebalancing               |
+
+
+
+
 <!--[![codecov](https://img.shields.io/codecov/c/github/vdaas/vald.svg?style=flat-square&logo=codecov)](https://codecov.io/gh/vdaas/vald) -->
 
 
