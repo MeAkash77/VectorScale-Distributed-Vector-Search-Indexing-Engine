@@ -20,6 +20,936 @@
 
 <!--[![codecov](https://img.shields.io/codecov/c/github/vdaas/vald.svg?style=flat-square&logo=codecov)](https://codecov.io/gh/vdaas/vald) -->
 
+
+# VectorScale
+
+### Distributed Vector Search & Indexing Engine
+
+> **A cloud-native distributed vector search engine built in Go, designed for low-latency ANN search, horizontally scalable index serving, and fault-tolerant distributed indexing.**
+
+[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go\&logoColor=white)](https://go.dev/)
+[![gRPC](https://img.shields.io/badge/gRPC-API-244c5a?logo=grpc)](https://grpc.io/)
+[![Protocol Buffers](https://img.shields.io/badge/Protobuf-IDL-4285F4?logo=google)](https://protobuf.dev/)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-Deployment-326CE5?logo=kubernetes\&logoColor=white)](https://kubernetes.io/)
+[![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?logo=docker\&logoColor=white)](https://www.docker.com/)
+[![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-Observability-000000?logo=opentelemetry)](https://opentelemetry.io/)
+
+---
+
+## Overview
+
+**VectorScale** is a distributed vector search and indexing engine designed around the idea that vector similarity search should scale like a distributed systems workload rather than remain confined to a single process.
+
+The system distributes vector indexes across multiple agents and uses **gRPC-based communication** to coordinate search operations across the cluster.
+
+A typical query follows this path:
+
+```text
+                    ┌─────────────────────┐
+                    │       Client        │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │      Gateway        │
+                    │ Query Coordination  │
+                    └──────────┬──────────┘
+                               │
+                         gRPC / Protobuf
+                               │
+             ┌─────────────────┼─────────────────┐
+             │                 │                 │
+             ▼                 ▼                 ▼
+       ┌──────────┐      ┌──────────┐      ┌──────────┐
+       │ Agent 01 │      │ Agent 02 │      │ Agent 03 │
+       │ ANN Index│      │ ANN Index│      │ ANN Index│
+       └────┬─────┘      └────┬─────┘      └────┬─────┘
+            │                 │                 │
+            └─────────────────┼─────────────────┘
+                              ▼
+                    ┌─────────────────────┐
+                    │   Result Aggregator │
+                    │      Top-K Merge    │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │      Response       │
+                    └─────────────────────┘
+```
+
+The project focuses on the engineering challenges behind:
+
+* Distributed ANN search
+* Parallel query execution
+* Vector-index partitioning
+* Service-to-service communication
+* Index persistence
+* Replication and recovery
+* Horizontal scaling
+* Failure handling
+* Cluster observability
+* Kubernetes-based deployment
+
+---
+
+# Why VectorScale?
+
+Traditional vector search can start with a single process and a single index.
+
+That model becomes increasingly difficult when the vector corpus grows and search workloads need to scale horizontally.
+
+VectorScale explores a distributed architecture where:
+
+```text
+                Large Vector Dataset
+                         │
+                         ▼
+              ┌────────────────────┐
+              │ Distributed Index  │
+              └─────────┬──────────┘
+                        │
+          ┌─────────────┼─────────────┐
+          ▼             ▼             ▼
+       Agent 1       Agent 2       Agent 3
+          │             │             │
+       ANN Index      ANN Index      ANN Index
+          │             │             │
+          └─────────────┼─────────────┘
+                        ▼
+                    Top-K Merge
+```
+
+This enables the architecture to reason about **scale, latency, availability and recovery independently**.
+
+---
+
+# Core Architecture
+
+## 1. Gateway
+
+The gateway acts as the entry point for vector-search requests.
+
+Responsibilities include:
+
+* Accepting search requests
+* Coordinating distributed queries
+* Discovering available agents
+* Sending requests to vector-search workers
+* Collecting partial results
+* Returning the aggregated Top-K response
+
+```text
+Client
+  │
+  ▼
+Gateway
+  │
+  ├──────► Agent 01
+  ├──────► Agent 02
+  ├──────► Agent 03
+  └──────► Agent N
+```
+
+---
+
+## 2. Distributed Vector Agents
+
+Each agent is responsible for serving a portion of the distributed vector index.
+
+An agent can:
+
+* Maintain a local ANN index
+* Execute similarity searches
+* Serve index-related requests
+* Participate in distributed query execution
+* Recover index state from persistent storage
+* Expose operational telemetry
+
+This allows additional agents to be introduced as cluster capacity grows.
+
+---
+
+## 3. ANN Search
+
+VectorScale uses an **approximate nearest-neighbor indexing approach** to avoid exhaustive comparison against every vector.
+
+Conceptually:
+
+```text
+Query Vector
+     │
+     ▼
+┌───────────────┐
+│ ANN Index     │
+│               │
+│ Candidate     │
+│ Retrieval     │
+└───────┬───────┘
+        │
+        ▼
+Top Candidate Vectors
+        │
+        ▼
+Similarity Ranking
+```
+
+The distributed layer allows multiple ANN indexes to search concurrently.
+
+---
+
+# Distributed Query Flow
+
+A complete search request can be represented as:
+
+```text
+1. Client submits vector query
+             │
+             ▼
+2. Gateway validates request
+             │
+             ▼
+3. Gateway discovers available agents
+             │
+             ▼
+4. Query fans out through gRPC
+             │
+       ┌─────┼─────┐
+       ▼     ▼     ▼
+      A01   A02   A03
+       │     │     │
+       ▼     ▼     ▼
+      ANN   ANN   ANN
+       │     │     │
+       └─────┼─────┘
+             ▼
+5. Partial results returned
+             │
+             ▼
+6. Results merged / Top-K selected
+             │
+             ▼
+7. Response returned to client
+```
+
+The key design principle is **parallel work followed by centralized result aggregation**.
+
+---
+
+# Fault Tolerance & Recovery
+
+Distributed systems must assume that individual components can fail.
+
+VectorScale therefore treats index availability and recovery as first-class architectural concerns.
+
+### Failure scenarios
+
+```text
+             ┌──────────┐
+             │ Gateway  │
+             └────┬─────┘
+                  │
+       ┌──────────┼──────────┐
+       ▼          ▼          ▼
+     Agent 1    Agent 2    Agent 3
+                            ✕
+                          FAILED
+```
+
+The architecture incorporates concepts such as:
+
+* Index replication
+* Persistent index backups
+* Agent recovery
+* Failure-aware query serving
+* Index restoration
+* Cluster rebalancing
+
+The objective is to prevent the failure of one worker from becoming an implicit failure of the entire search service.
+
+---
+
+# Horizontal Scaling
+
+VectorScale is designed around independently scalable search agents.
+
+```text
+                 Gateway
+                    │
+        ┌───────────┼───────────┐
+        ▼           ▼           ▼
+       A01         A02         A03
+
+                 + A04
+
+        ┌───────────┬───────────┬───────────┬───────────┐
+        ▼           ▼           ▼           ▼
+       A01         A02         A03         A04
+```
+
+Adding capacity means adding vector-search workers rather than redesigning the entire query architecture.
+
+This makes the architecture suitable for Kubernetes-based horizontal scaling.
+
+---
+
+# Index Lifecycle
+
+Vector indexes are treated as persistent system state rather than ephemeral process memory.
+
+A simplified lifecycle:
+
+```text
+Vector Data
+    │
+    ▼
+Index Construction
+    │
+    ▼
+Local ANN Index
+    │
+    ├──────────────► Persistent Backup
+    │
+    ▼
+Distributed Agent
+    │
+    ▼
+Query Serving
+    │
+    ▼
+Failure / Restart
+    │
+    ▼
+Index Recovery
+    │
+    ▼
+Resume Serving
+```
+
+This separates **index construction, serving and recovery** into explicit system responsibilities.
+
+---
+
+# Communication Layer
+
+VectorScale uses **gRPC + Protocol Buffers** for typed communication between distributed components.
+
+```text
+Gateway
+   │
+   │ Protobuf Request
+   ▼
+gRPC
+   │
+   ▼
+Vector Agent
+   │
+   │ Protobuf Response
+   ▼
+Gateway
+```
+
+Benefits include:
+
+* Strongly typed service contracts
+* Efficient binary serialization
+* Explicit API boundaries
+* Language-neutral interfaces
+* Efficient service-to-service communication
+
+---
+
+# Observability
+
+Distributed systems are difficult to operate without visibility into individual services.
+
+VectorScale incorporates observability concepts around:
+
+```text
+                    VectorScale
+                        │
+        ┌───────────────┼───────────────┐
+        ▼               ▼               ▼
+     Metrics          Traces           Logs
+        │               │               │
+        ▼               ▼               ▼
+   Prometheus      OpenTelemetry     Service Logs
+        │
+        ▼
+     Grafana
+```
+
+The observability layer can be used to understand:
+
+* Request latency
+* Agent health
+* Query fan-out
+* Search execution
+* Error rates
+* Recovery activity
+* Cluster behavior
+
+---
+
+# Kubernetes Deployment
+
+VectorScale is designed for containerized deployment using Kubernetes.
+
+A simplified deployment topology:
+
+```text
+                   Kubernetes Cluster
+┌───────────────────────────────────────────────────────┐
+│                                                       │
+│    ┌─────────────┐                                    │
+│    │   Gateway   │                                    │
+│    └──────┬──────┘                                    │
+│           │                                           │
+│     ┌─────┼───────────────┐                           │
+│     ▼     ▼               ▼                           │
+│  ┌─────┐ ┌─────┐       ┌─────┐                      │
+│  │ A01 │ │ A02 │  ...  │ AN  │                      │
+│  └─────┘ └─────┘       └─────┘                      │
+│                                                       │
+│       Horizontal Scaling / Recovery                  │
+│                                                       │
+└───────────────────────────────────────────────────────┘
+```
+
+The deployment model supports the broader distributed-system goals of:
+
+* Horizontal scaling
+* Service isolation
+* Automated scheduling
+* Failure recovery
+* Containerized deployment
+
+---
+
+# Technology Stack
+
+| Layer                    | Technology                          |
+| ------------------------ | ----------------------------------- |
+| Core Engine              | **Go**                              |
+| RPC                      | **gRPC**                            |
+| Interface Definition     | **Protocol Buffers**                |
+| Vector Search            | **NGT / ANN**                       |
+| Distributed Architecture | **Gateway + Vector Agents**         |
+| Containerization         | **Docker**                          |
+| Orchestration            | **Kubernetes**                      |
+| Cloud Deployment         | **AWS / EKS-oriented architecture** |
+| Observability            | **OpenTelemetry**                   |
+| Metrics                  | **Prometheus**                      |
+| Dashboards               | **Grafana**                         |
+
+---
+
+# Engineering Focus
+
+VectorScale is primarily a **distributed systems project**, not simply a vector database wrapper.
+
+The major engineering areas are:
+
+### Distributed Systems
+
+* Query fan-out
+* Distributed workers
+* Replication
+* Rebalancing
+* Failure recovery
+* Service discovery
+
+### Backend Engineering
+
+* Go
+* gRPC
+* Protocol Buffers
+* Service boundaries
+* Concurrent request processing
+
+### Database / Search Systems
+
+* ANN indexing
+* Vector similarity search
+* Index persistence
+* Index recovery
+* Top-K result aggregation
+
+### Infrastructure
+
+* Docker
+* Kubernetes
+* Horizontal scaling
+* Cluster operations
+
+### Observability
+
+* OpenTelemetry
+* Prometheus
+* Grafana
+* Distributed request visibility
+
+---
+
+# Design Principles
+
+## Parallelize Search
+
+Instead of forcing a single worker to search the complete corpus:
+
+```text
+Single Node
+
+Query
+ │
+ ▼
+████████████████████
+ Entire Vector Index
+```
+
+VectorScale moves toward:
+
+```text
+Distributed
+
+             Query
+               │
+       ┌───────┼───────┐
+       ▼       ▼       ▼
+     Index   Index   Index
+       │       │       │
+       └───────┼───────┘
+               ▼
+             Top-K
+```
+
+---
+
+## Isolate Failure
+
+A distributed worker should be replaceable.
+
+```text
+Healthy:
+
+A01 ── A02 ── A03 ── A04
+
+
+A03 fails:
+
+A01 ── A02    A04
+          \
+           Recovery
+
+
+After recovery:
+
+A01 ── A02 ── A03 ── A04
+```
+
+---
+
+## Make State Recoverable
+
+Indexes should have a recovery path.
+
+```text
+                    Persistent Storage
+                           │
+                           ▼
+                    ┌────────────┐
+                    │ Index Data │
+                    └─────┬──────┘
+                          │
+                    Restore / Load
+                          │
+                          ▼
+                    Vector Agent
+```
+
+---
+
+# Interactive Architecture Demo
+
+The repository also includes a high-graphics interactive visualization of the VectorScale architecture.
+
+The experience demonstrates:
+
+* 3D-style distributed cluster visualization
+* Animated network traffic
+* Gateway-to-agent communication
+* Vector search simulation
+* Query fan-out
+* Top-K aggregation
+* Dynamic agent scaling
+* Agent failure injection
+* Recovery simulation
+* Live telemetry visualization
+* Recruiter-oriented architecture walkthrough
+
+> **Note:** Visual telemetry in the demo is simulated for presentation purposes. Benchmark numbers should only be added when they have been measured from the actual implementation.
+
+---
+
+# Example Search Lifecycle
+
+```text
+                    ┌──────────────┐
+                    │ Search Query │
+                    └──────┬───────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │   Gateway    │
+                    └──────┬───────┘
+                           │
+                 ┌─────────┼─────────┐
+                 │         │         │
+                 ▼         ▼         ▼
+              Agent 1   Agent 2   Agent 3
+                 │         │         │
+                 ▼         ▼         ▼
+               ANN       ANN       ANN
+                 │         │         │
+                 └─────────┼─────────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │ Top-K Merge  │
+                    └──────┬───────┘
+                           │
+                           ▼
+                    Search Response
+```
+
+---
+
+# Getting Started
+
+## Prerequisites
+
+Install:
+
+* Go 1.22+
+* Docker
+* Protocol Buffers compiler
+* gRPC tooling
+* Kubernetes / Minikube / Kind for local cluster testing
+
+Verify Go:
+
+```bash
+go version
+```
+
+Verify Docker:
+
+```bash
+docker --version
+```
+
+Verify Kubernetes:
+
+```bash
+kubectl version --client
+```
+
+---
+
+## Clone
+
+```bash
+git clone https://github.com/MeAkash77/VectorScale.git
+cd VectorScale
+```
+
+---
+
+## Build
+
+```bash
+go build ./...
+```
+
+---
+
+## Test
+
+```bash
+go test ./...
+```
+
+For verbose output:
+
+```bash
+go test -v ./...
+```
+
+---
+
+## Run Locally
+
+```bash
+go run .
+```
+
+If the repository contains separate gateway and agent services, start them according to the service-specific configuration.
+
+---
+
+# Containerized Deployment
+
+Build the container:
+
+```bash
+docker build -t vectorscale:latest .
+```
+
+Run locally:
+
+```bash
+docker run --rm -p 8080:8080 vectorscale:latest
+```
+
+---
+
+# Kubernetes
+
+A typical deployment flow:
+
+```bash
+kubectl apply -f k8s/
+```
+
+Inspect workloads:
+
+```bash
+kubectl get pods
+```
+
+Inspect services:
+
+```bash
+kubectl get svc
+```
+
+View logs:
+
+```bash
+kubectl logs <pod-name>
+```
+
+---
+
+# Project Structure
+
+A recommended high-level structure:
+
+```text
+VectorScale/
+│
+├── cmd/
+│   ├── gateway/
+│   └── agent/
+│
+├── internal/
+│   ├── gateway/
+│   ├── agent/
+│   ├── index/
+│   ├── search/
+│   ├── discovery/
+│   ├── replication/
+│   └── recovery/
+│
+├── api/
+│   └── proto/
+│
+├── deployments/
+│   ├── docker/
+│   └── kubernetes/
+│
+├── observability/
+│   ├── prometheus/
+│   └── grafana/
+│
+├── scripts/
+│
+├── tests/
+│
+├── Dockerfile
+├── go.mod
+└── README.md
+```
+
+Adapt this structure to the actual repository layout rather than creating directories that do not exist.
+
+---
+
+# What I Learned
+
+Building VectorScale involves several systems-level tradeoffs:
+
+### 1. Distributed search introduces coordination cost
+
+Parallel search can reduce the amount of work performed by each worker, but fan-out and aggregation introduce network and coordination overhead.
+
+### 2. Index management becomes a distributed-state problem
+
+Once indexes are distributed, lifecycle operations such as persistence, recovery and rebalancing become as important as the search algorithm itself.
+
+### 3. Availability requires explicit failure handling
+
+A distributed architecture only becomes resilient when node failure, state recovery and routing behavior are deliberately designed.
+
+### 4. Observability is part of the architecture
+
+When one request crosses multiple services, latency and failures cannot be understood from a single process log.
+
+### 5. Scalability is more than adding machines
+
+A scalable architecture needs clear partitioning, communication boundaries, state ownership and recovery semantics.
+
+---
+
+# Future Improvements
+
+Potential extensions include:
+
+* Dynamic shard rebalancing
+* Adaptive replica placement
+* Consistent-hashing based routing
+* Query-result caching
+* SIMD/GPU-accelerated vector search
+* Multi-index search
+* Streaming ingestion
+* Online index updates
+* Automated capacity scaling
+* Advanced query scheduling
+* Benchmark suite and reproducible load testing
+* Chaos testing
+* Cross-region replication
+* SLO-driven autoscaling
+
+---
+
+# Performance Benchmarking
+
+When benchmarking VectorScale, measure the complete distributed path rather than only the local ANN implementation.
+
+Recommended metrics:
+
+| Metric           | Description                          |
+| ---------------- | ------------------------------------ |
+| P50 latency      | Median search latency                |
+| P95 latency      | Tail latency under normal load       |
+| P99 latency      | High-percentile tail latency         |
+| QPS              | Queries processed per second         |
+| Recall@K         | Search quality                       |
+| Fan-out latency  | Distributed query overhead           |
+| Index build time | Index construction performance       |
+| Recovery time    | Time to restore an unavailable agent |
+| Memory usage     | Per-agent memory footprint           |
+| CPU utilization  | Search workload utilization          |
+
+Example benchmark:
+
+```text
+Load
+ │
+ ├── 10 concurrent clients
+ ├── 100 concurrent clients
+ ├── 500 concurrent clients
+ └── 1000 concurrent clients
+          │
+          ▼
+     VectorScale
+          │
+          ▼
+ ┌──────────────────┐
+ │ P50 / P95 / P99  │
+ │ QPS / Recall@K   │
+ │ CPU / Memory     │
+ └──────────────────┘
+```
+
+> Only publish measured benchmark values from reproducible experiments.
+
+---
+
+# Why This Project Matters
+
+VectorScale demonstrates engineering across multiple layers of a modern infrastructure stack:
+
+```text
+             Distributed Systems
+                     │
+        ┌────────────┼────────────┐
+        ▼            ▼            ▼
+     Backend      Databases     Infra
+        │            │            │
+        ▼            ▼            ▼
+       Go          ANN Index   Kubernetes
+        │            │            │
+        └────────────┼────────────┘
+                     ▼
+                Observability
+                     │
+                     ▼
+             Production Thinking
+```
+
+The central challenge is not simply:
+
+> **"How do I search vectors?"**
+
+It is:
+
+> **"How do I make vector search distributed, scalable, observable and recoverable?"**
+
+That is the engineering problem VectorScale is designed to explore.
+
+---
+
+# Author
+
+**Akash Patro**
+
+Software Engineer focused on:
+
+* Distributed Systems
+* Backend Engineering
+* Databases & Storage
+* Cloud Infrastructure
+* High-Performance Systems
+* AI/ML Infrastructure
+
+---
+
+## License
+
+Add the license appropriate for the repository.
+
+---
+
+<p align="center">
+  <strong>VectorScale</strong><br>
+  Distributed Vector Search & Indexing Engine
+</p>
+
+<p align="center">
+  <sub>Built to explore scalable vector search through distributed systems engineering.</sub>
+</p>
+
+
+
+
+
+
+
+
+
+
+
 ## What is Vald?
 
 Vald is a highly scalable distributed fast approximate nearest neighbor (ANN) dense vector search engine.
